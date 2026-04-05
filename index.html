@@ -1174,11 +1174,8 @@ function drawRoomR(c){
   // === Chess board on desk ===
   // === Chess board on desk (side view) ===
   let cbx=dk.x+15,cby=dk.y,cbW=75,cbH2=12;
-  let cbHit=inR(G.mx,G.my,{x:cbx,y:cby-40,w:cbW,h:40+cbH2});
-  // Board side (thick slab, viewed from side)
-  c.fillStyle="#3a2a1a";c.fillRect(cbx,cby,cbW,cbH2);
-  c.fillStyle="#5a4030";c.fillRect(cbx,cby,cbW,3);
-  c.strokeStyle="#2a1a08";c.lineWidth=1;c.strokeRect(cbx,cby,cbW,cbH2);
+  let cbHit=inR(G.mx,G.my,{x:cbx,y:cby-40,w:cbW,h:40});
+  // Board side (thin edge visible above desk surface)
   // Top surface with checkerboard (foreshortened - thin strip visible from side)
   let topH=5;
   let sqW=cbW/8;
@@ -1257,7 +1254,7 @@ function clickRoomR(x,y){
       }
       sClick();msg("引き出しの中は空だ。",0);return;
     }
-    sClick();msg("机だ。上にチェスボードが置いてある。\n引き出しには鍵がかかっているようだ...",0);return;
+    sClick();msg("机だ。上にチェスボードが置いてある。\nチェスの駒は3Dプリンターで作られているようだ。\n引き出しには鍵がかかっている。",0);return;
   }
   // 3D Printer
   let pr={x:W/2-130,y:220,w:260,h:230};
@@ -1421,10 +1418,18 @@ function clickChess(x,y){
             deskDrawerOpen=true;
             msg("ナイトをf7に動かした。\n窒息メイト（Smothered Mate）！\nカチッ…机の引き出しのロックが外れた！",0);
           } else {
-            // Wrong move - reset selection, don't move
+            // Wrong move - animate piece, then revert
+            let savedPiece=chess.board[fromR][fromC];
+            let capturedPiece=chess.board[r][cl];
+            chess.board[r][cl]=savedPiece;
+            chess.board[fromR][fromC]=null;
             chess.selR=-1;chess.selC=-1;
             sErr();
-            msg("その手では何も起こらない…\n付箋のヒントを考えてみよう。",3000);
+            setTimeout(()=>{
+              chess.board[fromR][fromC]=savedPiece;
+              chess.board[r][cl]=capturedPiece;
+              msg("その手では何も起こらない…\n付箋のヒントを考えてみよう。",3000);
+            },600);
           }
         }
       }
