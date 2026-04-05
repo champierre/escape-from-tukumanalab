@@ -1,0 +1,3170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>つくまなラボ - 脱出ゲーム</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans JP',sans-serif;background:#0a0a1a;display:flex;justify-content:center;align-items:center;min-height:100vh;min-height:100dvh;overflow:hidden}
+#gc{position:relative;border:3px solid #0d2137;box-shadow:0 0 40px rgba(0,255,255,.25),inset 0 0 40px rgba(0,0,0,.5);border-radius:4px;transform-origin:center center}
+canvas{display:block;cursor:pointer}
+#msg{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,10,20,.95);color:#0ff;padding:14px 28px;border-radius:10px;font-size:clamp(15px,3.5vw,19px);border:1px solid rgba(0,255,255,.35);opacity:0;pointer-events:none;transition:opacity .35s;z-index:50;white-space:normal;word-break:break-word;letter-spacing:.5px;max-width:92%;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overflow-y:auto;-webkit-overflow-scrolling:touch;box-shadow:0 4px 20px rgba(0,0,0,.6);text-align:left}#msg.multiline{white-space:pre-line;text-align:left;font-size:clamp(14px,3.2vw,17px);line-height:1.7}
+#msg.show{opacity:1;pointer-events:auto}
+#msg::-webkit-scrollbar{width:4px}#msg::-webkit-scrollbar-thumb{background:rgba(0,255,255,.3);border-radius:2px}
+#size-warn{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;background:rgba(180,60,0,.95);color:#fff;text-align:center;padding:10px 16px;font-size:14px;font-family:'Noto Sans JP',sans-serif;letter-spacing:.3px;line-height:1.5;backdrop-filter:blur(4px)}
+#size-warn.show{display:block}
+#size-warn span{color:#ff0;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="size-warn">⚠ 画面が小さいため、ゲームの一部が表示されていません。<span>ブラウザを拡大</span>するか、<span>全画面表示</span>でお楽しみください。</div>
+<div id="gc">
+<canvas id="cv" width="1280" height="720"></canvas>
+</div>
+<div id="msg"></div>
+<script>
+"use strict";
+const W=1280,H=720,INV_H=80;
+const ST={INTRO:"intro",ROOM_L:"roomL",ROOM:"room",ROOM_R:"roomR",PASSCODE:"passcode",MODEL:"model",SLICE:"slice",PRINT:"print",FILAMENT:"filament",ROOM2:"room2",UVPRINT:"uvprint",UVREVEAL:"uvreveal",LASER:"laser",KEYPAD:"keypad",CHESS:"chess",WIN:"win"};
+const G={cv:null,cx:null,st:ST.INTRO,inv:[],sel:null,mx:0,my:0,t:0,msgEl:null,doorAnim:0,stage2Complete:false,introT:0,pcUnlocked:false};
+
+const room={
+  door:{x:990,y:120,w:220,h:480,locked:true},
+  comp:{x:80,y:280,w:200,h:140},
+  prn:{x:580,y:300,w:220,h:200},
+  wb:{x:340,y:60,w:280,h:200},
+  clock:{x:870,y:60,r:40}
+};
+
+const mdl={
+  parts:[],selIdx:-1,drag:false,dragOX:0,dragOY:0,
+  gs:20,rot:0,
+  tpl:{
+    head:{label:"キーヘッド",desc:"鍵の頭部分",w:3,h:3,col:"#3da5f5",colD:"#2878b8",colR:"#1e5a8a"},
+    shaft:{label:"キーシャフト",desc:"鍵の軸",w:8,h:1.5,col:"#3da5f5",colD:"#2878b8",colR:"#1e5a8a"},
+    tooth:{label:"キー歯",desc:"鍵の歯",w:1,h:0.8,col:"#3da5f5",colD:"#2878b8",colR:"#1e5a8a"}
+  }
+};
+
+const slc={layer:0,total:50,slicing:false,prog:0,done:false,gc:[],support:false};
+const prn={on:false,prog:0,layer:0,total:50,hx:50,dir:1,filSet:false,powered:false};
+let deskDrawerOpen=false;
+const chess={board:null,selR:-1,selC:-1,moved:false};
+function initChessBoard(){
+  // Smothered mate position: Ng5-f7#
+  chess.board=[
+    [null,null,null,null,null,null,'r','k'],
+    [null,null,null,null,null,null,'p','p'],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,'N',null],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,'K',null]
+  ];
+  chess.selR=-1;chess.selC=-1;chess.moved=false;
+}
+initChessBoard();
+const chessSym={K:'♔',Q:'♕',R:'♖',B:'♗',N:'♘',P:'♙',k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟'};
+const chessImg={};
+(function(){
+  const map={K:'wK',Q:'wQ',R:'wR',B:'wB',N:'wN',P:'wP',k:'bK',q:'bQ',r:'bR',b:'bB',n:'bN',p:'bP'};
+  for(let k in map){let img=new Image();img.src='pieces/'+map[k]+'.svg';chessImg[k]=img;}
+})();
+const room2={
+  door:{x:990,y:120,w:220,h:480,locked:true},
+  uvprinter:{x:80,y:280,w:220,h:160},
+  laser:{x:580,y:280,w:240,h:180},
+  plate:{x:340,y:350,w:60,h:50,taken:false},
+  uvlamp:{x:870,y:80,w:80,h:100},
+  wb:{x:350,y:60,w:260,h:180}
+};
+const uvp={printing:false,prog:0};
+const uvr={revealing:false,prog:0,revealed:false};
+const las={engraving:false,prog:0};
+const kpd={code:"",target:"1337"};
+const pcd={code:"",target:"2183525"};
+
+let aC=null;
+function iAudio(){try{aC=new(window.AudioContext||window.webkitAudioContext)}catch(e){}}
+function snd(f,d,t){
+  if(!aC)return;
+  let o=aC.createOscillator(),g=aC.createGain();
+  o.connect(g);g.connect(aC.destination);
+  o.frequency.value=f;o.type=t||"sine";
+  g.gain.setValueAtTime(.08,aC.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,aC.currentTime+d);
+  o.start(aC.currentTime);o.stop(aC.currentTime+d);
+}
+function sClick(){snd(880,.08,"square")}
+function sOk(){snd(523,.12);setTimeout(()=>snd(659,.12),120);setTimeout(()=>snd(784,.18),240)}
+function sErr(){snd(180,.25,"sawtooth")}
+function sPrint(){snd(280+Math.random()*80,.04,"square")}
+function sUnlock(){for(let i=0;i<5;i++)setTimeout(()=>snd(400+i*100,.1,"sine"),i*80)}
+
+function msg(t,d){let ml=t.includes("\n");G.msgEl.textContent=t;G.msgEl.classList.toggle("multiline",ml);G.msgEl.classList.add("show");G.msgEl.scrollTop=0;if(G.msgTimer){clearTimeout(G.msgTimer);G.msgTimer=null}if(d!==0)G.msgTimer=setTimeout(()=>{G.msgEl.classList.remove("show");setTimeout(()=>G.msgEl.classList.remove("multiline"),400)},d||2500)}
+
+// Convert screen coords to canvas coords (accounts for CSS scale)
+function toCanvas(sx,sy){
+  let r=G.cv.getBoundingClientRect();
+  return {x:(sx-r.left)/r.width*W, y:(sy-r.top)/r.height*H};
+}
+
+function init(){
+  G.cv=document.getElementById("cv");G.cx=G.cv.getContext("2d");G.msgEl=document.getElementById("msg");
+  // Mouse events
+  G.cv.addEventListener("mousemove",e=>{let p=toCanvas(e.clientX,e.clientY);G.mx=p.x;G.my=p.y});
+  G.cv.addEventListener("mousedown",onDown);
+  G.cv.addEventListener("mouseup",onUp);
+  G.cv.addEventListener("click",onClick);
+  // Touch events
+  G.cv.addEventListener("touchstart",onTouchStart,{passive:false});
+  G.cv.addEventListener("touchmove",onTouchMove,{passive:false});
+  G.cv.addEventListener("touchend",onTouchEnd,{passive:false});
+  document.addEventListener("keydown",onKey);
+  G.msgEl.addEventListener("click",()=>dismissMsg());
+  G.msgEl.addEventListener("touchend",e=>{if(!G._msgScrolled)dismissMsg();G._msgScrolled=false});
+  G.msgEl.addEventListener("touchmove",()=>{G._msgScrolled=true});
+  G.msgEl.addEventListener("touchstart",()=>{G._msgScrolled=false});
+  iAudio();
+  fitCanvas();window.addEventListener("resize",fitCanvas);
+  // デバッグ: ?stage=2 でステージ2から開始
+  let params=new URLSearchParams(location.search);
+  requestAnimationFrame(loop);
+  if(params.get("stage")==="2"){
+    G.st=ST.ROOM2;
+    room.door.locked=false;
+    msg("デバッグ: ステージ2から開始",2000);
+  }else{
+    G.st=ST.INTRO;G.introT=performance.now();
+  }
+}
+
+function inR(x,y,r){return x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h}
+
+function onDown(e){
+  let p=toCanvas(e.clientX,e.clientY),x=p.x,y=p.y;
+  if(G.st===ST.MODEL){
+    for(let i=mdl.parts.length-1;i>=0;i--){
+      let p=mdl.parts[i],bb=partBB(p);
+      if(x>=bb.x&&x<=bb.x+bb.w&&y>=bb.y&&y<=bb.y+bb.h){
+        mdl.selIdx=i;return;
+      }
+    }
+  }
+}
+function onUp(){}
+
+function partBB(p){
+  let gs=mdl.gs;
+  let pw=p.w*gs*1.2,ph=p.h*gs*1.2;
+  return{x:p.px-pw/2,y:p.py-ph/2,w:pw,h:ph};
+}
+function snapPart(p){
+  if(!p)return;
+  let gs=mdl.gs;
+  p.px=Math.round(p.px/gs)*gs;
+  p.py=Math.round(p.py/gs)*gs;
+}
+
+function dismissMsg(){if(G.msgEl.classList.contains("show")){G.msgEl.classList.remove("show");if(G.msgTimer){clearTimeout(G.msgTimer);G.msgTimer=null}setTimeout(()=>G.msgEl.classList.remove("multiline"),400);return true}return false}
+function onClick(e){
+  let p=toCanvas(e.clientX,e.clientY),x=p.x,y=p.y;
+  if(dismissMsg())return;
+  if(G.st===ST.INTRO){clickIntro(x,y);return}
+  if(G.st===ST.ROOM_L)clickRoomL(x,y);
+  else if(G.st===ST.ROOM)clickRoom(x,y);
+  else if(G.st===ST.ROOM_R)clickRoomR(x,y);
+  else if(G.st===ST.PASSCODE)clickPasscode(x,y);
+  else if(G.st===ST.MODEL)clickModel(x,y);
+  else if(G.st===ST.SLICE)clickSlice(x,y);
+  else if(G.st===ST.FILAMENT)clickFilament(x,y);
+  else if(G.st===ST.ROOM2)clickRoom2(x,y);
+  else if(G.st===ST.UVPRINT)clickUVPrint(x,y);
+  else if(G.st===ST.UVREVEAL)clickUVReveal(x,y);
+  else if(G.st===ST.LASER)clickLaser(x,y);
+  else if(G.st===ST.KEYPAD)clickKeypad(x,y);
+  else if(G.st===ST.CHESS)clickChess(x,y);
+  else if(G.st===ST.WIN)clickWin(x,y);
+  clickInv(x,y);
+}
+
+function onKey(e){}
+
+function clickIntro(x,y){
+  let elapsed=performance.now()-G.introT;
+  if(elapsed<1500)return; // wait for animation
+  let bx=W/2-100,by=H/2+120,bw=200,bh=50;
+  if(inR(x,y,{x:bx,y:by,w:bw,h:bh})){
+    G.st=ST.ROOM;sClick();
+  }
+}
+
+function clickWin(x,y){
+  let rbx=W/2-80,rby=H/2+60,rbw=160,rbh=42;
+  if(inR(x,y,{x:rbx,y:rby,w:rbw,h:rbh})){
+    G.st=ST.ROOM;G.inv=[];G.sel=null;G.doorAnim=0;G.stage2Complete=false;G.pcUnlocked=false;
+    room.door.locked=true;
+    prn.on=false;prn.prog=0;prn.layer=0;prn.hx=50;prn.dir=1;prn.filSet=false;prn.filIdx=null;prn.powered=false;deskDrawerOpen=false;initChessBoard();
+    sClick();msg("つくまなラボから脱出せよ！");
+  }
+}
+
+function clickRoom(x,y){
+  // Navigation arrows
+  if(clickArrow(x,y,"left")){G.st=ST.ROOM_L;sClick();return}
+  if(clickArrow(x,y,"right")){G.st=ST.ROOM_R;sClick();return}
+  if(inR(x,y,room.door)){
+    if(room.door.locked){
+      if(G.sel==="key"){room.door.locked=false;G.inv=G.inv.filter(i=>i!=="key");G.sel=null;sUnlock();msg("鍵が開いた！脱出成功！");setTimeout(()=>{G.st=ST.WIN},1200)}
+      else{msg("鍵がかかっている... 鍵が必要だ。");sErr()}
+    }else{G.st=ST.WIN;sOk()}
+    return;
+  }
+  if(x>=room.wb.x&&x<=room.wb.x+room.wb.w&&y>=room.wb.y&&y<=room.wb.y+room.wb.h){msg("ホワイトボード: 「鍵 = ヘッド + シャフト + 歯」と書いてある...");sClick();return}
+  if(x>=710&&x<=810&&y>=90&&y<=210){msg("ゲルショッカーの掟\n\n1.めいれいにしたがわないものは、ころす。\n2.敵にまけたものは、『窒息させて』ころす。\n3.しっぱいしたものは、ころす。\n4.平和をあいするものは、ころす。\n5.友情をだいじにするものは、ころす。\n6.なまけもの・おくびょうものは、ころす。\n7.ちこくしたものは、ころす。\n8.病人けが人は、ころす。\n9.おや子、兄弟も組織のためには、ころす。\n\n2項だけ『窒息させて』と\n赤字で落書きされている。意味深だ…",0);sClick();return}
+  // 消火器
+  if(x>=860&&x<=900&&y>=340&&y<=430){sClick();msg("消火器だ。。",0);return}
+  let cd=Math.hypot(x-room.clock.x,y-room.clock.y);
+  if(cd<room.clock.r+10){let d=new Date();msg(`現在時刻: ${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")} - 脱出を急がないと！`);sClick()}
+}
+
+function clickModel(x,y){
+  // Close button
+  if(x>W-90&&x<W-10&&y>12&&y<52){G.st=ST.ROOM_L;sClick();return}
+  // Export button
+  if(x>W-260&&x<W-110&&y>12&&y<52){
+    if(validateKey()){G.st=ST.SLICE;slc.done=false;slc.slicing=false;slc.prog=0;slc.layer=0;slc.support=false;sOk();msg("STLエクスポート成功！スライサーを起動...")}
+    else{sErr();msg("鍵の形になっていません。ヘッド・シャフト・歯×2を配置してください。",3500)}
+    return;
+  }
+  // Template buttons
+  let ty=110;
+  for(let k of["head","shaft","tooth"]){
+    if(x>15&&x<185&&y>ty&&y<ty+50){addPart(k);sClick();return}
+    ty+=65;
+  }
+}
+
+function addPart(k){
+  // Prevent duplicates (tooth can be placed twice)
+  let count=mdl.parts.filter(p=>p.k===k).length;
+  if(k==="tooth"&&count>=2){msg("キー歯は2つまでです");sErr();return}
+  if(k!=="tooth"&&count>=1){msg("このパーツは既に配置済みです");sErr();return}
+  let t=mdl.tpl[k];
+  // Fixed positions forming a key shape matching the whiteboard sketch
+  // Part pixel sizes (gs=20): head=60x60, shaft=160x30, tooth=20x16
+  // Parts are drawn centered on (px,py)
+  let gcx=740,gcy=350;
+  let px,py;
+  // Head left edge=630, right edge=690
+  if(k==="head"){px=660;py=gcy}
+  // Shaft left edge=690 (flush with head right), right edge=850
+  else if(k==="shaft"){px=770;py=gcy}
+  // Teeth hang below shaft bottom(365): center_y = 365+8 = 373
+  else if(k==="tooth"&&count===0){px=730;py=373}
+  else{px=790;py=373}
+  mdl.parts.push({k:k,w:t.w,h:t.h,px:px,py:py,col:t.col,colD:t.colD,colR:t.colR});
+  mdl.selIdx=mdl.parts.length-1;
+  // Auto-select highlight briefly
+  let placed=mdl.parts.filter(p=>true).length;
+  if(placed>=4){msg("全パーツ配置完了！ STLエクスポートしよう！");sOk()}
+  else{msg(`${t.label}を配置しました（${placed}/4）`)}
+}
+
+function validateKey(){
+  let hd=0,sh=0,to=0;
+  for(let p of mdl.parts){
+    if(p.w>=2.5&&p.w<=4&&p.h>=2.5&&p.h<=4)hd++;
+    if(p.w>=6&&p.h>=1&&p.h<=2.5)sh++;
+    if(p.w<=2&&p.h<=1.5)to++;
+  }
+  return hd>=1&&sh>=1&&to>=2&&mdl.parts.length>=4;
+}
+
+function clickSlice(x,y){
+  if(x>W-90&&x<W-10&&y>12&&y<52){G.st=ST.MODEL;sClick();return}
+  // Support checkbox (left panel, y around 258)
+  if(x>12&&x<190&&y>246&&y<280){slc.support=!slc.support;sClick();return}
+  // Slice button
+  if(!slc.done&&!slc.slicing&&x>W/2-110&&x<W/2+110&&y>H-130&&y<H-85){
+    if(!slc.support){sErr();msg("⚠ サポートが無効です！オーバーハング部分が崩れます。サポートを有効にしてください。",4000);return}
+    startSlice();sClick();return
+  }
+  // Send to printer
+  if(slc.done&&x>W/2-130&&x<W/2+130&&y>H-130&&y<H-85){
+    if(!prn.powered){sErr();msg("⚠ 送信失敗：3Dプリンターの電源が入っていません。\n工作室（3DP室）で電源ケーブルを接続してください。",5000);return}
+    if(!prn.filSet){sErr();msg("⚠ 送信失敗：3Dプリンターにフィラメントがセットされていません。\n工作室（3DP室）でフィラメントをセットしてから\nもう一度「プリンターに送信」してください。",5000);return}
+    G.st=ST.PRINT;prn.on=true;prn.prog=0;prn.layer=0;prn.hx=50;sClick();msg("Gコードを3Dプリンターに送信...");return;
+  }
+  // Layer slider
+  if(x>W-70&&x<W-30&&y>100&&y<520){slc.layer=Math.max(0,Math.min(slc.total,Math.floor((y-100)/420*slc.total)))}
+}
+
+function startSlice(){
+  slc.slicing=true;slc.prog=0;
+  let iv=setInterval(()=>{
+    slc.prog+=2;snd(400+slc.prog*4,.03,"square");
+    if(slc.prog>=100){clearInterval(iv);slc.slicing=false;slc.done=true;genGcode();sOk();msg("スライス完了！ 50レイヤー / 推定12分")}
+  },40);
+}
+
+function genGcode(){
+  slc.gc=["; つくまなスライサー v2.1","G28 ; ホーム","M104 S210 ; ノズル温度","M140 S60 ; ベッド温度","G92 E0"];
+  for(let i=0;i<slc.total;i++){
+    slc.gc.push(`; レイヤー ${i} / Z=${(i*.2).toFixed(1)}mm`);
+    slc.gc.push(`G1 Z${(i*.2).toFixed(2)} F3000`);
+    slc.gc.push(`G1 X${(10+Math.random()*40).toFixed(1)} Y${(10+Math.random()*30).toFixed(1)} E${(i*.5).toFixed(2)} F1500`);
+  }
+}
+
+function clickRoom2(x,y){
+  if(inR(x,y,room2.door)){
+    if(room2.door.locked){
+      G.st=ST.KEYPAD;sClick();
+    }else{
+      G.st=ST.WIN;G.stage2Complete=true;sOk();
+    }
+    return;
+  }
+  if(inR(x,y,room2.uvprinter)){
+    if(G.inv.includes("plate")&&!G.inv.includes("plate_uv")){
+      G.st=ST.UVPRINT;sClick();msg("UVプリンターを起動...");
+    }else if(G.inv.includes("plate_uv")){msg("既にUVインクで印刷済みです。");sClick()}
+    else{msg("UVプリンター - 印刷する物が必要です。");sClick()}
+    return;
+  }
+  if(inR(x,y,room2.laser)){
+    if(G.inv.includes("plate_revealed")&&!G.inv.includes("plate_engraved")){
+      G.st=ST.LASER;sClick();msg("レーザー加工機を起動...");
+    }else if(G.inv.includes("plate_engraved")){msg("既に刻印済みです。");sClick()}
+    else{msg("レーザー加工機 - 加工する物が必要です。");sClick()}
+    return;
+  }
+  if(!room2.plate.taken&&inR(x,y,room2.plate)){
+    room2.plate.taken=true;G.inv.push("plate");sOk();msg("白いアクリル板を拾った！");return;
+  }
+  if(inR(x,y,room2.uvlamp)){
+    if(G.inv.includes("plate_uv")&&!uvr.revealed){
+      G.st=ST.UVREVEAL;sClick();msg("UVランプを使う...");
+    }else if(uvr.revealed){msg("既にコードが見えています。");sClick()}
+    else{msg("UVランプ - UVインクで印刷された物が必要です。");sClick()}
+    return;
+  }
+  if(x>=room2.wb.x&&x<=room2.wb.x+room2.wb.w&&y>=room2.wb.y&&y<=room2.wb.y+room2.wb.h){
+    msg("ホワイトボード: 「見えないものを見る方法は？ → UV」");sClick();
+  }
+}
+
+function clickUVPrint(x,y){
+  if(x>W-90&&x<W-10&&y>12&&y<52){G.st=ST.ROOM2;sClick();return}
+  if(!uvp.printing&&x>W/2-110&&x<W/2+110&&y>H-130&&y<H-85){
+    startUVPrint();sClick();
+  }
+}
+
+function startUVPrint(){
+  uvp.printing=true;uvp.prog=0;
+  let iv=setInterval(()=>{
+    uvp.prog+=3;snd(350+uvp.prog*2,.03,"sine");
+    if(uvp.prog>=100){
+      clearInterval(iv);uvp.printing=false;
+      G.inv=G.inv.filter(i=>i!=="plate");G.inv.push("plate_uv");
+      sOk();msg("UVインクで印刷完了！見えないコードが印刷されました。",3000);
+      setTimeout(()=>G.st=ST.ROOM2,800);
+    }
+  },30);
+}
+
+function clickUVReveal(x,y){
+  // Auto-reveal animation, no clicks needed during animation
+}
+
+function clickLaser(x,y){
+  if(x>W-90&&x<W-10&&y>12&&y<52){G.st=ST.ROOM2;sClick();return}
+  if(!las.engraving&&x>W/2-110&&x<W/2+110&&y>H-130&&y<H-85){
+    startLaser();sClick();
+  }
+}
+
+function startLaser(){
+  las.engraving=true;las.prog=0;
+  let iv=setInterval(()=>{
+    las.prog+=2.5;snd(220+Math.random()*100,.04,"sawtooth");
+    if(las.prog>=100){
+      clearInterval(iv);las.engraving=false;
+      G.inv=G.inv.filter(i=>i!=="plate_revealed");G.inv.push("plate_engraved");
+      sOk();msg("レーザー刻印完了！コードが刻まれました。",3000);
+      setTimeout(()=>G.st=ST.ROOM2,800);
+    }
+  },35);
+}
+
+function clickKeypad(x,y){
+  if(x>W-90&&x<W-10&&y>12&&y<52){G.st=ST.ROOM2;kpd.code="";sClick();return}
+  // Number buttons (3x4 grid)
+  let bx=W/2-150,by=200,bw=90,bh=80,gap=10;
+  for(let r=0;r<4;r++){
+    for(let c=0;c<3;c++){
+      let px=bx+c*(bw+gap),py=by+r*(bh+gap);
+      if(x>px&&x<px+bw&&y>py&&y<py+bh){
+        let num=r===3&&c===1?"0":(r<3?String(r*3+c+1):"");
+        if(num){
+          if(kpd.code.length<4){kpd.code+=num;sClick()}
+        }else if(r===3&&c===0){kpd.code="";sClick()} // Clear
+        else if(r===3&&c===2){checkKeypad()} // Enter
+        return;
+      }
+    }
+  }
+}
+
+function checkKeypad(){
+  if(kpd.code===kpd.target){
+    room2.door.locked=false;sUnlock();
+    msg("正しいコード！ドアが開きました！",3000);
+    setTimeout(()=>{G.st=ST.ROOM2;kpd.code=""},1200);
+  }else{
+    sErr();msg("間違ったコードです...");kpd.code="";
+  }
+}
+
+function clickInv(x,y){
+  if(y<H-INV_H)return;
+  let sx=160,sy=H-INV_H+10;
+  for(let i=0;i<G.inv.length;i++){
+    let ix=sx+i*75;
+    if(x>ix&&x<ix+60&&y>sy&&y<sy+60){
+      G.sel=G.sel===G.inv[i]?null:G.inv[i];sClick();
+      if(G.sel){
+        if(G.sel==="key")msg("「3Dプリント鍵」を選択中 → ドアに使おう！");
+        else if(G.sel==="power_cable")msg("電源ケーブルを選択中 → 3Dプリンターに接続しよう！");
+        else if(G.sel.startsWith("fil_"))msg(filNames[parseInt(G.sel[4])]+"のフィラメントを選択中");
+      }
+    }
+  }
+}
+
+// ==================== DRAWING ====================
+
+function draw(){
+  const c=G.cx;
+  c.fillStyle="#080812";c.fillRect(0,0,W,H);
+  if(G.st===ST.INTRO){drawIntro(c);return}
+  if(G.st===ST.ROOM_L)drawRoomL(c);
+  else if(G.st===ST.ROOM)drawRoom(c);
+  else if(G.st===ST.ROOM_R)drawRoomR(c);
+  else if(G.st===ST.PASSCODE)drawPasscode(c);
+  else if(G.st===ST.MODEL)drawModel(c);
+  else if(G.st===ST.SLICE)drawSlice(c);
+  else if(G.st===ST.PRINT)drawPrint(c);
+  else if(G.st===ST.FILAMENT)drawFilament(c);
+  else if(G.st===ST.ROOM2)drawRoom2(c);
+  else if(G.st===ST.UVPRINT)drawUVPrint(c);
+  else if(G.st===ST.UVREVEAL)drawUVReveal(c);
+  else if(G.st===ST.LASER)drawLaser(c);
+  else if(G.st===ST.KEYPAD)drawKeypad(c);
+  else if(G.st===ST.CHESS)drawChess(c);
+  else if(G.st===ST.WIN)drawWin(c);
+  if(G.st!==ST.WIN)drawInv(c);
+  // Cursor indicator when item selected
+  if(G.sel&&(G.st===ST.ROOM||G.st===ST.ROOM_L||G.st===ST.ROOM_R)){
+    c.save();c.globalAlpha=.7;
+    if(G.sel==="power_cable"){
+      c.strokeStyle="#222";c.lineWidth=3;
+      c.beginPath();c.moveTo(G.mx+10,G.my+10);c.lineTo(G.mx+25,G.my+25);c.stroke();
+      c.fillStyle="#333";c.fillRect(G.mx+5,G.my+4,10,12);
+      c.fillStyle="#aaa";c.fillRect(G.mx+7,G.my+2,2,4);c.fillRect(G.mx+12,G.my+2,2,4);
+    }else if(G.sel.startsWith("fil_")){
+      let fi=parseInt(G.sel[4]);
+      c.strokeStyle=filColors[fi];c.lineWidth=3;
+      c.beginPath();c.arc(G.mx+20,G.my+20,10,0,Math.PI*2);c.stroke();
+      c.strokeStyle=filDark[fi];c.lineWidth=2;
+      c.beginPath();c.arc(G.mx+20,G.my+20,4,0,Math.PI*2);c.stroke();
+    }else{
+      drawKeySmall(c,G.mx+20,G.my+20,16,prn.filIdx!=null?filColors[prn.filIdx]:null);
+    }
+    c.restore();
+  }
+}
+
+// ==================== SHARED ROOM BACKGROUND ====================
+
+function drawRoomBG(c){
+  let t=G.t;
+  // Back wall
+  let wg=c.createLinearGradient(0,0,0,420);
+  wg.addColorStop(0,"#f5f5f0");wg.addColorStop(1,"#e8e8e3");
+  c.fillStyle=wg;c.fillRect(0,0,W,420);
+  // Wall texture lines
+  c.strokeStyle="rgba(0,0,0,.03)";c.lineWidth=1;
+  for(let i=0;i<W;i+=40){c.beginPath();c.moveTo(i,0);c.lineTo(i,420);c.stroke()}
+  // Floor
+  let fg=c.createLinearGradient(0,420,0,H-INV_H);
+  fg.addColorStop(0,"#d5d5d0");fg.addColorStop(1,"#c0c0bb");
+  c.fillStyle=fg;c.fillRect(0,420,W,H-420-INV_H);
+  // Floor tiles
+  c.strokeStyle="rgba(0,0,0,.08)";c.lineWidth=1;
+  for(let x=0;x<W;x+=80){c.beginPath();c.moveTo(x,420);c.lineTo(x,H-INV_H);c.stroke()}
+  for(let y=420;y<H-INV_H;y+=60){c.beginPath();c.moveTo(0,y);c.lineTo(W,y);c.stroke()}
+  // Floor reflection
+  c.fillStyle="rgba(255,255,255,.15)";c.fillRect(200,430,300,8);c.fillRect(700,450,200,5);
+  // Baseboard
+  c.fillStyle="#bbb8b0";c.fillRect(0,415,W,8);
+  // Ceiling Lights
+  for(let i=0;i<4;i++){
+    let lx=180+i*290;
+    let flicker=.85+Math.sin(t*.003+i*1.7)*.15;
+    c.fillStyle="#ccc";c.fillRect(lx-70,8,140,10);
+    c.fillStyle="#ddd";c.fillRect(lx-65,10,130,6);
+    let lg=c.createRadialGradient(lx,25,5,lx,25,200);
+    lg.addColorStop(0,`rgba(255,255,240,${.15*flicker})`);lg.addColorStop(1,"rgba(255,255,240,0)");
+    c.fillStyle=lg;c.fillRect(lx-200,0,400,200);
+    c.fillStyle=`rgba(255,255,240,${.9*flicker})`;c.fillRect(lx-55,18,110,8);
+  }
+}
+
+// Draw navigation arrow (dir: "left" or "right", label: optional room name)
+function drawArrow(c,dir,label){
+  let ax,ay=H/2-50,aw=80,ah=140;
+  if(dir==="left"){ax=15}else{ax=W-95}
+  let hov=G.mx>=ax&&G.mx<=ax+aw&&G.my>=ay&&G.my<=ay+ah;
+  // Pulse animation
+  let pulse=Math.sin(G.t*.003)*.08;
+  // Semi-transparent bg
+  c.fillStyle=hov?"rgba(0,200,255,.3)":`rgba(0,80,120,${.18+pulse})`;
+  roundRect(c,ax,ay,aw,ah,12);c.fill();
+  c.strokeStyle=hov?"rgba(0,255,255,.7)":"rgba(0,200,255,.35)";
+  c.lineWidth=2;roundRect(c,ax,ay,aw,ah,12);c.stroke();
+  // Arrow chevron
+  c.save();
+  c.fillStyle=hov?"#0ff":"rgba(0,200,255,.7)";
+  c.beginPath();
+  let cx=ax+aw/2,cy=ay+ah/2-10;
+  if(dir==="left"){
+    c.moveTo(cx+14,cy-22);c.lineTo(cx-14,cy);c.lineTo(cx+14,cy+22);
+  }else{
+    c.moveTo(cx-14,cy-22);c.lineTo(cx+14,cy);c.lineTo(cx-14,cy+22);
+  }
+  c.closePath();c.fill();
+  // Label under arrow
+  if(label){
+    c.fillStyle=hov?"#fff":"rgba(0,200,255,.8)";
+    c.font='bold 11px "Noto Sans JP"';c.textAlign="center";
+    c.fillText(label,ax+aw/2,ay+ah-12);
+  }
+  c.restore();
+}
+
+function clickArrow(x,y,dir){
+  let ax,ay=H/2-50,aw=80,ah=140;
+  if(dir==="left"){ax=15}else{ax=W-95}
+  return x>=ax&&x<=ax+aw&&y>=ay&&y<=ay+ah;
+}
+
+// ==================== ROOM LEFT (CAD室) ====================
+
+function drawRoomL(c){
+  drawRoomBG(c);
+  let t=G.t;
+
+  // Room label
+  c.fillStyle="#888";c.font='14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("CAD室",W/2,30);
+
+  // === Computer / Desk (centered) ===
+  let cp={x:W/2-100,y:250,w:200,h:140};
+  let cpH=G.mx>=cp.x&&G.mx<=cp.x+cp.w&&G.my>=cp.y&&G.my<=cp.y+cp.h;
+  // Desk
+  c.fillStyle="#2e3045";
+  c.fillRect(cp.x-20,cp.y+cp.h-10,cp.w+40,25);
+  c.fillStyle="#252738";
+  c.fillRect(cp.x-10,cp.y+cp.h+15,12,80);
+  c.fillRect(cp.x+cp.w-2,cp.y+cp.h+15,12,80);
+  // Keyboard
+  c.fillStyle="#222";c.fillRect(cp.x+30,cp.y+cp.h-5,120,18);
+  c.strokeStyle="#444";c.lineWidth=1;c.strokeRect(cp.x+30,cp.y+cp.h-5,120,18);
+  for(let r=0;r<3;r++)for(let k=0;k<10;k++){c.fillStyle="#333";c.fillRect(cp.x+34+k*11,cp.y+cp.h-2+r*5,9,4)}
+  // Mouse
+  c.fillStyle="#222";
+  c.beginPath();c.ellipse(cp.x+170,cp.y+cp.h+2,8,12,0,0,Math.PI*2);c.fill();
+  c.strokeStyle="#444";c.lineWidth=1;c.stroke();
+  // Monitor
+  c.fillStyle="#111";c.fillRect(cp.x+5,cp.y,cp.w-10,cp.h-30);
+  c.fillStyle=cpH?"#0a2845":"#081e35";c.fillRect(cp.x+12,cp.y+8,cp.w-24,cp.h-46);
+  c.strokeStyle=cpH?"#0cf":"#145";c.lineWidth=2;c.strokeRect(cp.x+5,cp.y,cp.w-10,cp.h-30);
+  c.fillStyle="#222";c.fillRect(cp.x+80,cp.y+cp.h-30,40,22);
+  c.fillRect(cp.x+60,cp.y+cp.h-10,80,8);
+  // Screen content
+  let st=t*.001;
+  let scrX=cp.x+12,scrY=cp.y+8,scrW=cp.w-24,scrH=cp.h-46;
+  if(!G.pcUnlocked){
+    // === Passcode lock screen on monitor ===
+    let scx=scrX+scrW/2,scy=scrY+scrH/2;
+    // Lock icon
+    c.fillStyle="#0cf";c.font='20px sans-serif';c.textAlign="center";
+    c.fillText("🔒",scx,scy-22);
+    // Title
+    c.fillStyle="#0af";c.font='bold 10px "Noto Sans JP"';
+    c.fillText("パスコード入力",scx,scy-6);
+    // Input field
+    c.fillStyle="#001a00";c.fillRect(scx-50,scy+2,100,16);
+    c.strokeStyle="#0a0";c.lineWidth=1;c.strokeRect(scx-50,scy+2,100,16);
+    // Blinking underscores
+    c.fillStyle="#0f0";c.font='bold 10px "Share Tech Mono"';
+    let blink=Math.sin(st*3)>.0?"█":"_";
+    c.fillText("_ _ _ _ _ _ "+blink,scx,scy+14);
+    // Numpad hint (tiny dots grid)
+    c.fillStyle="rgba(0,170,255,.3)";
+    for(let r=0;r<3;r++)for(let k=0;k<3;k++){
+      c.beginPath();c.arc(scx-12+k*12,scy+28+r*8,1.5,0,Math.PI*2);c.fill();
+    }
+  }else{
+    // === TukuCAD Ready screen ===
+    c.fillStyle="#0f0";c.font='13px "Share Tech Mono"';c.textAlign="left";
+    c.fillText("TukuCAD v3.2",cp.x+20,cp.y+30);
+    c.fillStyle="#0a0";
+    c.fillText("> Ready",cp.x+20,cp.y+50);
+    let cursor=Math.sin(st*3)>.0?"█":"";
+    c.fillText(`> Click to start${cursor}`,cp.x+20,cp.y+70);
+  }
+  if(cpH){
+    let sg=c.createRadialGradient(cp.x+cp.w/2,cp.y+cp.h/2,10,cp.x+cp.w/2,cp.y+cp.h/2,120);
+    sg.addColorStop(0,"rgba(0,255,255,.06)");sg.addColorStop(1,"rgba(0,0,0,0)");
+    c.fillStyle=sg;c.fillRect(cp.x-50,cp.y-50,cp.w+100,cp.h+100);
+  }
+  let ledCol=G.pcUnlocked?`rgba(0,255,0,${.5+Math.sin(st*2)*.3})`:`rgba(255,60,0,${.5+Math.sin(st*2)*.3})`;
+  c.fillStyle=ledCol;
+  c.beginPath();c.arc(cp.x+cp.w-20,cp.y+cp.h-35,3,0,Math.PI*2);c.fill();
+
+  // === Poster: つくまなラボ ===
+  c.save();
+  c.shadowColor="rgba(0,120,200,.2)";c.shadowBlur=10;
+  c.fillStyle="#ffffff";c.fillRect(100,60,230,165);
+  c.restore();
+  c.strokeStyle="#2090d0";c.lineWidth=3;c.strokeRect(100,60,230,165);
+  c.strokeStyle="rgba(0,120,200,.2)";c.lineWidth=1;c.strokeRect(108,68,214,149);
+  c.fillStyle="#1a7ab5";c.font='bold 30px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("つくまなラボ",215,120);
+  c.fillStyle="#2090d0";c.font='14px "Noto Sans JP"';
+  c.fillText("TUKUMANA LAB",215,150);
+  c.fillStyle="#5aacda";c.font='12px "Noto Sans JP"';
+  c.fillText("— つくって学ぶ —",215,180);
+  c.fillStyle="#2090d0";c.font="20px sans-serif";c.fillText("🔧⚙️🔬",215,205);
+
+  // === Sticky note on monitor ===
+  let sn={x:W/2+70,y:268,w:38,h:35};
+  let snH=inR(G.mx,G.my,sn);
+  c.save();
+  c.translate(sn.x+sn.w/2,sn.y+sn.h/2);
+  c.rotate(-0.12);
+  c.fillStyle=snH?"#fff44f":"#f5e642";
+  c.fillRect(-sn.w/2,-sn.h/2,sn.w,sn.h);
+  c.strokeStyle="rgba(0,0,0,.15)";c.lineWidth=1;
+  c.strokeRect(-sn.w/2,-sn.h/2,sn.w,sn.h);
+  // Fold corner
+  c.fillStyle="rgba(0,0,0,.08)";
+  c.beginPath();c.moveTo(sn.w/2,sn.h/2);c.lineTo(sn.w/2-10,sn.h/2);c.lineTo(sn.w/2,sn.h/2-10);c.closePath();c.fill();
+  // Text on sticky
+  c.fillStyle="#333";c.font='8px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("memo",0,-4);
+  c.fillText("📝",0,10);
+  c.restore();
+  if(snH){c.strokeStyle="rgba(0,200,255,.5)";c.lineWidth=2;c.strokeRect(sn.x-2,sn.y-2,sn.w+4,sn.h+4)}
+
+  // === Torn Hiragana Chart on wall (behind PC) ===
+  let hc={x:W/2-240,y:55,w:185,h:195};
+  let hcH=inR(G.mx,G.my,hc);
+  // Full 五十音 grid data (5 cols x 10 rows, but we only show first few rows)
+  let hAllChars=[
+    ["あ","い","う","え","お"],
+    ["か","き","く","け","こ"],
+    ["さ","し","す","せ","そ"],
+    ["た","ち","つ","て","と"],
+    ["な","に","ぬ","ね","の"]
+  ];
+  let hNums={"あ":"1","い":"2","う":"3","か":"6","き":"7","さ":"11"};
+  let cellW=30,cellH=28;
+  let gridX=hc.x+12,gridY=hc.y+30;
+  let numRows=5,numCols=5;
+  // Explicit visible cells: あいう(row0), かき(row1), さし(row2)
+  let visibleCells=[[0,0],[0,1],[0,2],[1,0],[1,1],[2,0],[2,1]];
+  function isCellVisible(row,col){
+    return visibleCells.some(v=>v[0]===row&&v[1]===col);
+  }
+  // Tear line passes OUTSIDE the rightmost visible cell in each row
+  // Row 0: right edge of う(col2) = gridX+3*cellW → tear at col 3.3
+  // Row 1: right edge of き(col1) = gridX+2*cellW → tear at col 2.3
+  // Row 2: right edge of し(col1) = gridX+2*cellW → tear at col 2.3
+  // Row 3+: nothing → tear at col < 0
+  // Line: tearCol = 3.6 - row*1.15
+  // Row0=3.6, Row1=2.45, Row2=1.3, Row3=0.15, Row4=-1.0
+  // Row2=1.3 means tear at gridX+39px, but し right edge=gridX+60. Not enough!
+  // Use piecewise: generous padding past each row's last visible cell
+  let tearColByRow=[3.6, 3.15, 2.5, 1.2, -0.5, -1.5];
+  let tearPoints=[];
+  for(let i=0;i<tearColByRow.length;i++){
+    let px=gridX+tearColByRow[i]*cellW;
+    let py=gridY+i*cellH;
+    let jag=Math.sin(i*5.7+2)*3+Math.cos(i*9.3)*2;
+    tearPoints.push({x:px+jag,y:py});
+    // Add mid-point jag between rows for more realistic tear
+    if(i<tearColByRow.length-1){
+      let midTC=(tearColByRow[i]+tearColByRow[i+1])/2;
+      let mpx=gridX+midTC*cellW;
+      let mpy=py+cellH/2;
+      let mjag=Math.sin((i+0.5)*8.1)*4+Math.cos((i+0.5)*6.3)*2;
+      tearPoints.push({x:mpx+mjag,y:mpy});
+    }
+  }
+  // Paper shape
+  c.save();
+  c.fillStyle=hcH?"#fff":"#f8f5f0";
+  let tearStartX=tearPoints[0].x;
+  c.beginPath();
+  c.moveTo(hc.x+2,hc.y+3);
+  c.lineTo(hc.x+4,hc.y);
+  c.lineTo(tearStartX+6,hc.y+1);
+  c.lineTo(tearStartX+3,hc.y+6);
+  let leftEdgeX=hc.x+2;
+  let lastTear=tearPoints[tearPoints.length-1];
+  // Only draw tear points until they reach the left edge of the paper
+  let paperBottomY=tearPoints[0].y;
+  for(let i=0;i<tearPoints.length;i++){
+    let tp=tearPoints[i];
+    if(tp.x<=leftEdgeX+3){
+      // Interpolate where tear crosses the left edge
+      if(i>0){
+        let prev=tearPoints[i-1];
+        let t=(leftEdgeX+3-prev.x)/(tp.x-prev.x);
+        paperBottomY=prev.y+t*(tp.y-prev.y);
+        c.lineTo(leftEdgeX+3,paperBottomY);
+      } else {
+        paperBottomY=tp.y;
+        c.lineTo(tp.x,tp.y);
+      }
+      break;
+    }
+    c.lineTo(tp.x,tp.y);
+    paperBottomY=tp.y;
+  }
+  c.closePath();
+  c.fill();
+  c.strokeStyle="rgba(0,0,0,.12)";c.lineWidth=1;c.stroke();
+  c.restore();
+  // Torn edge highlight (only draw points within paper bounds)
+  c.save();
+  c.strokeStyle="rgba(160,140,120,.6)";c.lineWidth=1.5;
+  c.beginPath();
+  c.moveTo(tearStartX+3,hc.y+6);
+  for(let tp of tearPoints){ if(tp.x<leftEdgeX) break; c.lineTo(tp.x,tp.y); }
+  c.stroke();
+  c.strokeStyle="rgba(255,255,255,.5)";c.lineWidth=0.5;
+  c.beginPath();
+  c.moveTo(tearStartX+2,hc.y+7);
+  for(let tp of tearPoints){ if(tp.x<leftEdgeX) break; c.lineTo(tp.x-1,tp.y-1); }
+  c.stroke();
+  c.restore();
+  // Clip & draw content
+  c.save();
+  c.beginPath();
+  c.moveTo(hc.x-5,hc.y-5);
+  c.lineTo(tearStartX+12,hc.y-5);
+  c.lineTo(tearStartX+3,hc.y+6);
+  for(let tp of tearPoints) c.lineTo(tp.x,tp.y);
+  c.lineTo(hc.x-5,lastTear.y+10);
+  c.closePath();
+  c.clip();
+  // Title
+  c.fillStyle="#c33";c.font='bold 13px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("ひらがなひょう",hc.x+hc.w/2-15,hc.y+20);
+  // Draw visible cells
+  for(let vc of visibleCells){
+    let row=vc[0],col=vc[1];
+    let cx=gridX+col*cellW+cellW/2;
+    let cy=gridY+row*cellH;
+    // Cell border
+    c.strokeStyle="rgba(0,0,0,.1)";c.lineWidth=0.5;
+    c.strokeRect(gridX+col*cellW,cy,cellW,cellH);
+    // Character
+    let ch=hAllChars[row][col];
+    c.fillStyle="#222";c.font='15px "Noto Sans JP"';c.textAlign="center";
+    c.fillText(ch,cx,cy+20);
+    // Number in bottom-right corner
+    if(hNums[ch]){
+      c.fillStyle="#777";c.font='bold 8px "Share Tech Mono"';c.textAlign="right";
+      c.fillText(hNums[ch],gridX+col*cellW+cellW-2,cy+cellH-2);
+    }
+  }
+  c.restore();
+  if(hcH){c.strokeStyle="rgba(0,200,255,.5)";c.lineWidth=2;c.strokeRect(hc.x-2,hc.y-2,hc.w+4,hc.h+4)}
+
+  // === Bookshelf ===
+  let bsR={x:800,y:100,w:180,h:320};
+  let bsH=inR(G.mx,G.my,bsR);
+  c.fillStyle=bsH?"#6a5040":"#5a4030";c.fillRect(800,100,180,320);
+  c.strokeStyle="#3a2818";c.lineWidth=2;c.strokeRect(800,100,180,320);
+  for(let sh=0;sh<4;sh++){
+    let sy=100+sh*80;
+    c.fillStyle="#4a3525";c.fillRect(802,sy+70,176,8);
+    // Books
+    let bx=806;
+    for(let b=0;b<6;b++){
+      let bw=12+Math.sin(sh*5+b*3)*8;
+      let bh=55+Math.sin(sh*7+b*2)*12;
+      let colors=["#c44","#48a","#4a4","#a84","#84a","#aa4","#a4a","#4aa"];
+      c.fillStyle=colors[(sh*6+b)%colors.length];
+      c.fillRect(bx,sy+70-bh,bw,bh);
+      c.strokeStyle="rgba(0,0,0,.15)";c.lineWidth=1;c.strokeRect(bx,sy+70-bh,bw,bh);
+      bx+=bw+3;
+    }
+  }
+
+  // Right arrow → center room
+  drawArrow(c,"right","メイン室");
+}
+
+function clickRoomL(x,y){
+  // Right arrow → center
+  if(clickArrow(x,y,"right")){G.st=ST.ROOM;sClick();return}
+  // Bookshelf
+  if(inR(x,y,{x:800,y:100,w:180,h:320})){sClick();msg("本棚には本や雑誌が並んでいる。\n\n「小学生からはじめるわくわくプログラミング」\n「作ることでまなぶ」\nといった本や、\n「子供の科学」\n「ムー」\nといった雑誌が並んでいる。",0);return}
+  // Sticky note on PC
+  let sn={x:W/2+70,y:268,w:38,h:35};
+  if(inR(x,y,sn)){sClick();msg("付箋紙に手書きで書かれている：\n\n『パスコードはいつもの』",0);return}
+  // Torn hiragana chart on wall behind PC
+  let hc={x:W/2-240,y:55,w:185,h:195};
+  if(inR(x,y,hc)){
+    sClick();
+    msg("壁にひらがな表が貼ってあるが、斜めに大きく破れている。\n左上から右下に向かって引き裂かれたようだ。\n\n残っている文字と、右下隅の小さな数字：\n\n　あ₁　い₂　う₃\n　か₆　き₇\n　さ₁₁　し\n\n残りは破れてなくなっている。",0);
+    return;
+  }
+  // Computer
+  let cp={x:W/2-100,y:250,w:200,h:140};
+  if(inR(x,y,cp)){
+    if(!G.pcUnlocked){
+      G.st=ST.PASSCODE;pcd.code="";sClick();msg("PCにパスコードロックがかかっている...");
+      return;
+    }
+    if(slc.done){G.st=ST.SLICE;sClick();msg("スライサーを再開...");}
+    else if(mdl.parts.length>0){G.st=ST.MODEL;sClick();msg("TukuCADを再開...");}
+    else{G.st=ST.MODEL;mdl.parts=[];mdl.selIdx=-1;mdl.rot=0;sClick();msg("3Dモデリングソフト「TukuCAD」を起動...");}
+    return;
+  }
+}
+
+// ==================== ROOM CENTER (メインルーム) ====================
+
+function drawRoom(c){
+  drawRoomBG(c);
+  let t=G.t;
+
+  // === Whiteboard (centered) ===
+  let wb=room.wb;
+  let wbH=inR(G.mx,G.my,wb);
+  c.fillStyle=wbH?"#f0f0f0":"#e5e5e8";
+  c.fillRect(wb.x,wb.y,wb.w,wb.h);
+  c.strokeStyle="#888";c.lineWidth=6;c.strokeRect(wb.x,wb.y,wb.w,wb.h);
+  // Tray
+  c.fillStyle="#999";c.fillRect(wb.x+20,wb.y+wb.h,wb.w-40,8);
+  // Content
+  c.textAlign="left";
+  c.fillStyle="#2255bb";c.font='bold 16px "Noto Sans JP"';
+  c.fillText("鍵の設計メモ:",wb.x+15,wb.y+30);
+  c.fillStyle="#3344aa";c.font='14px "Noto Sans JP"';
+  c.fillText("① キーヘッド（正方形）",wb.x+15,wb.y+55);
+  c.fillText("② キーシャフト（長方形）",wb.x+15,wb.y+78);
+  c.fillText("③ キー歯（小さい凸）",wb.x+15,wb.y+101);
+  c.fillStyle="#cc3322";c.font='bold 18px "Share Tech Mono"';
+  c.fillText("→ 3D Print!",wb.x+15,wb.y+130);
+  // Arrow diagram
+  c.strokeStyle="#2255bb";c.lineWidth=2;
+  c.beginPath();c.moveTo(wb.x+200,wb.y+90);c.lineTo(wb.x+260,wb.y+90);
+  c.lineTo(wb.x+255,wb.y+85);c.moveTo(wb.x+260,wb.y+90);c.lineTo(wb.x+255,wb.y+95);c.stroke();
+  // Key sketch
+  c.strokeStyle="#cc4433";c.lineWidth=2;
+  c.strokeRect(wb.x+180,wb.y+140,30,30);
+  c.strokeRect(wb.x+210,wb.y+148,60,14);
+  c.strokeRect(wb.x+230,wb.y+162,8,8);c.strokeRect(wb.x+250,wb.y+162,8,8);
+  if(wbH){c.strokeStyle="rgba(0,200,255,.5)";c.lineWidth=2;c.strokeRect(wb.x-2,wb.y-2,wb.w+4,wb.h+4)}
+
+  // === Clock ===
+  let ck=room.clock;
+  c.save();c.translate(ck.x,ck.y);
+  c.fillStyle="#1a2a1a";c.beginPath();c.arc(0,0,ck.r,0,Math.PI*2);c.fill();
+  c.strokeStyle="#5a8a5a";c.lineWidth=3;c.beginPath();c.arc(0,0,ck.r,0,Math.PI*2);c.stroke();
+  // Hands
+  let d=new Date();
+  let ha=(d.getHours()%12+d.getMinutes()/60)/12*Math.PI*2-Math.PI/2;
+  let ma=(d.getMinutes()+d.getSeconds()/60)/60*Math.PI*2-Math.PI/2;
+  let sa=d.getSeconds()/60*Math.PI*2-Math.PI/2;
+  c.strokeStyle="#eed800";c.lineWidth=3;c.beginPath();c.moveTo(0,0);c.lineTo(Math.cos(ha)*18,Math.sin(ha)*18);c.stroke();
+  c.lineWidth=2;c.beginPath();c.moveTo(0,0);c.lineTo(Math.cos(ma)*26,Math.sin(ma)*26);c.stroke();
+  c.strokeStyle="#ffee44";c.lineWidth=1;c.beginPath();c.moveTo(0,0);c.lineTo(Math.cos(sa)*30,Math.sin(sa)*30);c.stroke();
+  c.fillStyle="#ffee44";c.beginPath();c.arc(0,0,3,0,Math.PI*2);c.fill();
+  c.restore();
+
+  // === Door ===
+  let dr=room.door;
+  let drH=inR(G.mx,G.my,dr);
+  // Door frame
+  c.fillStyle="#3a4055";
+  c.fillRect(dr.x-12,dr.y-12,dr.w+24,dr.h+16);
+  // Door
+  let dg=c.createLinearGradient(dr.x,dr.y,dr.x+dr.w,dr.y);
+  dg.addColorStop(0,drH?"#4a5570":"#3e4560");dg.addColorStop(1,drH?"#3e4860":"#333a50");
+  c.fillStyle=dg;c.fillRect(dr.x,dr.y,dr.w,dr.h);
+  // Door panels
+  c.strokeStyle="rgba(255,255,255,.08)";c.lineWidth=2;
+  c.strokeRect(dr.x+20,dr.y+25,dr.w-40,dr.h/2-35);
+  c.strokeRect(dr.x+20,dr.y+dr.h/2+5,dr.w-40,dr.h/2-30);
+  // Rivets
+  for(let ry of[dr.y+20,dr.y+dr.h-20]){
+    for(let rx of[dr.x+15,dr.x+dr.w-15]){
+      c.fillStyle="#556";c.beginPath();c.arc(rx,ry,3,0,Math.PI*2);c.fill();
+    }
+  }
+  // Keyhole area
+  let khx=dr.x+45,khy=dr.y+dr.h/2;
+  c.fillStyle="#667";
+  c.beginPath();c.arc(khx,khy,12,0,Math.PI*2);c.fill();
+  if(dr.locked){
+    c.fillStyle="#111";
+    c.beginPath();c.arc(khx,khy,5,0,Math.PI*2);c.fill();
+    c.fillRect(khx-2,khy,4,14);
+    // Lock indicator
+    c.fillStyle="#f33";c.beginPath();c.arc(khx,khy-20,4,0,Math.PI*2);c.fill();
+  }else{
+    c.fillStyle="#0f0";c.beginPath();c.arc(khx,khy,5,0,Math.PI*2);c.fill();
+    c.fillStyle="#0f0";c.beginPath();c.arc(khx,khy-20,4,0,Math.PI*2);c.fill();
+  }
+  // Exit sign
+  c.save();c.shadowColor="rgba(0,255,0,.5)";c.shadowBlur=10;
+  c.fillStyle="#060";c.fillRect(dr.x+55,dr.y-55,110,38);
+  c.restore();
+  c.strokeStyle="#0f0";c.lineWidth=2;c.strokeRect(dr.x+55,dr.y-55,110,38);
+  c.fillStyle="#0f0";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("出口 →",dr.x+110,dr.y-28);
+  // Hover highlight
+  if(drH){c.strokeStyle="rgba(0,255,255,.5)";c.lineWidth=3;c.strokeRect(dr.x-2,dr.y-2,dr.w+4,dr.h+4)}
+
+  // === Extra decorations ===
+  // 消火器（床置き）
+  let feX=870,feY=420-70;
+  c.fillStyle="#c22";c.fillRect(feX,feY+10,22,55);
+  c.fillStyle="#a00";c.fillRect(feX+2,feY+2,18,12);
+  c.fillStyle="#444";c.fillRect(feX+9,feY-6,4,10);
+  // ノズル
+  c.fillStyle="#888";c.fillRect(feX+16,feY-2,8,6);
+  c.strokeStyle="#666";c.lineWidth=1.5;
+  c.beginPath();c.moveTo(feX+24,feY+1);c.quadraticCurveTo(feX+30,feY-6,feX+28,feY-10);c.stroke();
+  // ラベル
+  c.fillStyle="#555";c.font='9px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("消火器",feX+11,feY+72);
+  // Gel-Shocker poster
+  c.fillStyle="#1a0a00";c.fillRect(710,90,100,120);
+  c.strokeStyle="#660000";c.lineWidth=2;c.strokeRect(710,90,100,120);
+  c.fillStyle="#f00";c.font='bold 13px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("☠",760,112);
+  c.fillStyle="#ff4444";c.font='bold 10px "Noto Sans JP"';
+  c.fillText("ゲルショッカー",760,130);
+  c.fillText("の掟",760,145);
+  // Small text lines (unreadable from distance)
+  c.fillStyle="#773333";c.font='5px "Noto Sans JP"';
+  for(let i=0;i<7;i++){
+    c.fillRect(722,155+i*8,76,3);
+  }
+
+  // Navigation arrows
+  drawArrow(c,"left","CAD室");
+  drawArrow(c,"right","工作室");
+}
+
+// ==================== ROOM RIGHT (3Dプリンター室) ====================
+
+function drawRoomR(c){
+  drawRoomBG(c);
+  let t=G.t;
+
+  // Room label
+  c.fillStyle="#888";c.font='14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("3Dプリンター室",W/2,30);
+
+  // === 3D Printer (centered, bigger) ===
+  let pr={x:W/2-130,y:220,w:260,h:230};
+  let prH=G.mx>=pr.x&&G.mx<=pr.x+pr.w&&G.my>=pr.y&&G.my<=pr.y+pr.h;
+  // Table
+  c.fillStyle="#2e3045";
+  c.fillRect(pr.x-15,pr.y+pr.h-10,pr.w+30,20);
+  c.fillStyle="#252738";
+  c.fillRect(pr.x-5,pr.y+pr.h+10,12,70);
+  c.fillRect(pr.x+pr.w-7,pr.y+pr.h+10,12,70);
+  // Printer body
+  c.fillStyle=prH?"#1e2035":"#181a2c";
+  c.fillRect(pr.x,pr.y,pr.w,pr.h);
+  // Frame uprights
+  c.fillStyle="#3a3d55";
+  c.fillRect(pr.x+10,pr.y+10,14,pr.h-25);
+  c.fillRect(pr.x+pr.w-24,pr.y+10,14,pr.h-25);
+  // Top bar
+  c.fillRect(pr.x+10,pr.y+10,pr.w-20,14);
+  // Build plate
+  c.fillStyle="#444860";c.fillRect(pr.x+40,pr.y+pr.h-55,pr.w-80,10);
+  // Extruder
+  let ex=prn.powered?pr.x+70+Math.sin(t*.004)*60:pr.x+70;
+  c.fillStyle="#ff7700";c.fillRect(ex,pr.y+35,40,28);
+  c.fillStyle="#ff9933";c.fillRect(ex+12,pr.y+63,16,10);
+  // Filament spool
+  c.strokeStyle=prn.filSet?filColors[prn.filIdx]:"#333";c.lineWidth=2;
+  c.beginPath();c.arc(pr.x+pr.w-45,pr.y+35,18,0,Math.PI*2);c.stroke();
+  c.beginPath();c.arc(pr.x+pr.w-45,pr.y+35,6,0,Math.PI*2);c.stroke();
+  // Status LED
+  let led;
+  if(!prn.powered){led="#333"}
+  else if(G.inv.includes("key")){led="#0f0"}
+  else{led=Math.sin(t*.005)>.0?"#f80":"#530"}
+  c.fillStyle=led;c.beginPath();c.arc(pr.x+28,pr.y+28,5,0,Math.PI*2);c.fill();
+  // LCD screen
+  c.fillStyle=prn.powered?"#001a00":"#111";c.fillRect(pr.x+50,pr.y+pr.h-35,100,24);
+  if(prn.powered){
+    c.fillStyle="#0a0";c.font='12px "Share Tech Mono"';c.textAlign="center";
+    c.fillText("IDLE",pr.x+100,pr.y+pr.h-18);
+  }
+  // Power cable (visible when connected)
+  if(prn.powered){
+    c.strokeStyle="#222";c.lineWidth=3;
+    c.beginPath();c.moveTo(pr.x+pr.w-5,pr.y+pr.h-15);c.lineTo(pr.x+pr.w+15,pr.y+pr.h-10);c.lineTo(pr.x+pr.w+25,pr.y+pr.h+5);c.stroke();
+    c.fillStyle="#333";c.fillRect(pr.x+pr.w-8,pr.y+pr.h-20,8,12);
+  }
+  // Brand
+  c.fillStyle="#556";c.font='bold 13px "Share Tech Mono"';
+  c.fillText("TUKUMANA X1",pr.x+pr.w/2,pr.y+pr.h-3);
+  // Hover glow
+  if(prH){c.strokeStyle="rgba(0,200,255,.4)";c.lineWidth=2;c.strokeRect(pr.x-2,pr.y-2,pr.w+4,pr.h+4)}
+  c.strokeStyle=prH?"#0af":"#2a2d45";c.lineWidth=2;c.strokeRect(pr.x,pr.y,pr.w,pr.h);
+
+  // === Filament rack ===
+  let fr={x:100,y:120,w:120,h:280};
+  let frH=inR(G.mx,G.my,fr);
+  c.fillStyle=frH?"#4a4030":"#3a3020";c.fillRect(100,120,120,280);
+  c.strokeStyle="#2a2015";c.lineWidth=2;c.strokeRect(100,120,120,280);
+  let spoolColors=["#4af","#f44","#4f4","#fa4","#f4f"];
+  let hasFilament=G.inv.some(i=>i.startsWith("fil_"));
+  for(let i=0;i<5;i++){
+    let sy=135+i*52;
+    c.fillStyle="#2a2015";c.fillRect(102,sy+38,116,6);
+    let taken=hasFilament&&G.inv.includes("fil_"+i);
+    c.strokeStyle=taken?"#333":spoolColors[i];c.lineWidth=3;
+    c.beginPath();c.arc(160,sy+20,16,0,Math.PI*2);c.stroke();
+    c.beginPath();c.arc(160,sy+20,5,0,Math.PI*2);c.stroke();
+  }
+  c.fillStyle="#666";c.font='10px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("フィラメント",160,410);
+
+  // === Tool board ===
+  let tb={x:850,y:80,w:180,h:200};
+  let tbH=inR(G.mx,G.my,tb);
+  c.fillStyle=tbH?"#e5e2d9":"#d8d5cc";c.fillRect(850,80,180,200);
+  c.strokeStyle="#aaa";c.lineWidth=2;c.strokeRect(850,80,180,200);
+  // Tools drawn on board
+  // -- Ruler (定規) --
+  c.fillStyle="#ddc";c.fillRect(865,95,12,170);
+  c.strokeStyle="#999";c.lineWidth=1;c.strokeRect(865,95,12,170);
+  for(let i=0;i<17;i++){
+    let ry=95+i*10;
+    let long=i%5===0;
+    c.strokeStyle="#666";c.lineWidth=1;
+    c.beginPath();c.moveTo(877,ry);c.lineTo(877-(long?8:4),ry);c.stroke();
+  }
+  c.fillStyle="#888";c.font='7px "Share Tech Mono"';c.textAlign="left";
+  c.fillText("0",879,100);c.fillText("5",879,150);c.fillText("10",879,200);c.fillText("15",879,250);
+
+  // -- Nipper (ニッパー) --
+  c.save();c.translate(930,165);c.rotate(-0.2);
+  // Handles
+  c.fillStyle="#c44";c.lineWidth=1;
+  c.beginPath();c.moveTo(-6,0);c.lineTo(-10,50);c.lineTo(-4,52);c.lineTo(0,4);c.closePath();c.fill();
+  c.strokeStyle="#922";c.stroke();
+  c.fillStyle="#c44";
+  c.beginPath();c.moveTo(6,0);c.lineTo(10,50);c.lineTo(4,52);c.lineTo(0,4);c.closePath();c.fill();
+  c.strokeStyle="#922";c.stroke();
+  // Pivot
+  c.fillStyle="#888";c.beginPath();c.arc(0,2,4,0,Math.PI*2);c.fill();
+  c.strokeStyle="#666";c.stroke();
+  // Jaws
+  c.fillStyle="#999";
+  c.beginPath();c.moveTo(-5,0);c.lineTo(-3,-22);c.lineTo(0,-18);c.lineTo(0,0);c.closePath();c.fill();
+  c.strokeStyle="#777";c.lineWidth=1;c.stroke();
+  c.fillStyle="#999";
+  c.beginPath();c.moveTo(5,0);c.lineTo(3,-22);c.lineTo(0,-18);c.lineTo(0,0);c.closePath();c.fill();
+  c.strokeStyle="#777";c.stroke();
+  c.restore();
+
+  // -- Screwdriver (ドライバー) --
+  c.save();c.translate(980,100);
+  c.fillStyle="#e94";roundRect(c,-5,0,10,22,3);c.fill();c.strokeStyle="#b72";c.lineWidth=1;roundRect(c,-5,0,10,22,3);c.stroke();
+  c.fillStyle="#aaa";c.fillRect(-2,22,4,50);
+  c.strokeStyle="#888";c.lineWidth=1;c.strokeRect(-2,22,4,50);
+  c.fillStyle="#999";c.fillRect(-3,70,6,4);
+  c.restore();
+
+  // -- Cutter (カッター) --
+  c.save();c.translate(1015,110);c.rotate(0.15);
+  c.fillStyle="#e0c040";c.fillRect(-4,0,8,55);
+  c.strokeStyle="#b09020";c.lineWidth=1;c.strokeRect(-4,0,8,55);
+  c.fillStyle="#ccc";
+  c.beginPath();c.moveTo(-1,55);c.lineTo(1,55);c.lineTo(0,70);c.closePath();c.fill();
+  c.strokeStyle="#999";c.stroke();
+  c.restore();
+
+  c.fillStyle="#888";c.font='10px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("工具",940,260);
+
+  // === Desk with drawer (near tool board) ===
+  let dk={x:840,y:380,w:200,h:70};
+  let dkH=inR(G.mx,G.my,{x:dk.x,y:dk.y,w:dk.w,h:dk.h+80});
+  // Desktop surface
+  c.fillStyle=dkH?"#7a6a55":"#6a5a45";
+  c.fillRect(dk.x,dk.y,dk.w,dk.h);
+  c.strokeStyle="#4a3a28";c.lineWidth=2;c.strokeRect(dk.x,dk.y,dk.w,dk.h);
+  // Legs
+  c.fillStyle="#5a4a38";
+  c.fillRect(dk.x+8,dk.y+dk.h,12,80);
+  c.fillRect(dk.x+dk.w-20,dk.y+dk.h,12,80);
+  // Drawer
+  let drY=dk.y+12;
+  let drX=dk.x+dk.w/2-50,drW=100,drH=45;
+  if(deskDrawerOpen){
+    // Open drawer - pulled out and hanging down
+    let odX=drX-5,odY=dk.y+dk.h-5,odW=drW+10,odH=48;
+    // Drawer cavity (dark hole in desk)
+    c.fillStyle="#2a2018";c.fillRect(drX,drY,drW,drH);
+    c.strokeStyle="#3a2a18";c.lineWidth=1;c.strokeRect(drX,drY,drW,drH);
+    // Pulled-out drawer body
+    c.fillStyle="#8a7a65";c.fillRect(odX,odY,odW,odH);
+    c.strokeStyle="#5a4a35";c.lineWidth=1;c.strokeRect(odX,odY,odW,odH);
+    // Drawer inner sides (3D effect)
+    c.fillStyle="#7a6a55";c.fillRect(odX+3,odY+3,odW-6,odH-6);
+    c.fillStyle="rgba(0,0,0,.15)";c.fillRect(odX+5,odY+5,odW-10,odH-10);
+    // Knob on pulled-out drawer
+    c.fillStyle="#aa9";c.beginPath();c.arc(odX+odW/2,odY+odH-8,4,0,Math.PI*2);c.fill();
+    // Power cable floating above drawer (if not taken)
+    if(!G.inv.includes("power_cable")&&!prn.powered){
+      let cableY=odY-30;
+      c.strokeStyle="#222";c.lineWidth=4;
+      c.beginPath();
+      c.moveTo(odX+12,cableY+10);
+      c.bezierCurveTo(odX+35,cableY+25,odX+55,cableY+2,odX+odW-15,cableY+18);
+      c.stroke();
+      c.fillStyle="#333";c.fillRect(odX+5,cableY+4,14,16);
+      c.fillStyle="#aaa";c.fillRect(odX+7,cableY+1,3,5);c.fillRect(odX+14,cableY+1,3,5);
+      c.fillStyle="#333";c.fillRect(odX+odW-18,cableY+12,14,10);
+      c.fillStyle="#555";c.fillRect(odX+odW-16,cableY+14,4,6);c.fillRect(odX+odW-10,cableY+14,4,6);
+      c.fillStyle="#ff0";c.font='bold 10px "Noto Sans JP"';c.textAlign="center";
+      c.fillText("⚡ 電源ケーブル",odX+odW/2,cableY-4);
+    }
+  } else {
+    // Closed drawer
+    c.fillStyle="#7a6a55";c.fillRect(drX,drY,drW,drH);
+    c.strokeStyle="#5a4a35";c.lineWidth=1;c.strokeRect(drX,drY,drW,drH);
+    c.fillStyle="#aa9";c.beginPath();c.arc(drX+drW/2,drY+drH/2,4,0,Math.PI*2);c.fill();
+  }
+  // === Chess board on desk ===
+  // === Chess board on desk (side view) ===
+  let cbx=dk.x+15,cby=dk.y,cbW=75,cbH2=12;
+  let cbHit=inR(G.mx,G.my,{x:cbx,y:cby-40,w:cbW,h:40+cbH2});
+  // Board side (thick slab, viewed from side)
+  c.fillStyle="#3a2a1a";c.fillRect(cbx,cby,cbW,cbH2);
+  c.fillStyle="#5a4030";c.fillRect(cbx,cby,cbW,3);
+  c.strokeStyle="#2a1a08";c.lineWidth=1;c.strokeRect(cbx,cby,cbW,cbH2);
+  // Top surface with checkerboard (foreshortened - thin strip visible from side)
+  let topH=5;
+  let sqW=cbW/8;
+  for(let cl=0;cl<8;cl++){
+    c.fillStyle=cl%2===0?"#e8d4a8":"#8b6b4a";
+    c.fillRect(cbx+cl*sqW,cby-topH,sqW,topH);
+  }
+  c.strokeStyle="#2a1a08";c.lineWidth=0.5;c.strokeRect(cbx,cby-topH,cbW,topH);
+  // Pieces standing on the board (side silhouettes)
+  // Show 2 rows: back pieces (tall) and front pawns (short)
+  // Pieces viewed from the side - draw as small SVG images standing up
+  let pieceH=28,pawnH=20,pw=sqW-1;
+  // Back row pieces (row 0 = white, row 7 = black)
+  let backRow0=chess.board[0]; // white back row
+  let backRow7=chess.board[7]; // black back row
+  let pawnRow1=chess.board[1]; // white pawns
+  let pawnRow6=chess.board[6]; // black pawns
+  // Draw pieces from left to right - white side (left half) then black side (right half)
+  for(let cl=0;cl<8;cl++){
+    let px=cbx+cl*sqW+0.5;
+    // Back row piece
+    let bp=chess.board[0][cl];
+    if(bp&&chessImg[bp]&&chessImg[bp].complete){
+      let h=(bp==='K'||bp==='Q'||bp==='k'||bp==='q')?pieceH:pieceH-4;
+      c.drawImage(chessImg[bp],px,cby-topH-h,pw,h);
+    }
+    // Pawn row
+    let pp=chess.board[1][cl];
+    if(pp&&chessImg[pp]&&chessImg[pp].complete){
+      c.drawImage(chessImg[pp],px,cby-topH-pawnH+4,pw,pawnH-4);
+    }
+  }
+  // Also draw black pieces on right - show row 7 and 6 offset slightly behind
+  for(let cl=0;cl<8;cl++){
+    let px=cbx+cl*sqW+0.5;
+    let bp7=chess.board[7][cl];
+    if(bp7&&chessImg[bp7]&&chessImg[bp7].complete){
+      let h=(bp7==='K'||bp7==='Q'||bp7==='k'||bp7==='q')?pieceH:pieceH-4;
+      c.globalAlpha=0.5;
+      c.drawImage(chessImg[bp7],px,cby-topH-h+6,pw,h-4);
+      c.globalAlpha=1.0;
+    }
+  }
+  // Hover glow on chess board area
+  if(cbHit){
+    c.strokeStyle="rgba(255,220,100,.7)";c.lineWidth=2;c.strokeRect(cbx-4,cby-42,cbW+8,56);
+    c.fillStyle="rgba(255,220,100,.1)";c.fillRect(cbx-3,cby-41,cbW+6,54);
+  }
+  if(dkH&&!cbHit){c.strokeStyle="rgba(0,200,255,.4)";c.lineWidth=2;c.strokeRect(dk.x-2,dk.y-2,dk.w+4,dk.h+84)}
+
+  // Left arrow ← center room
+  drawArrow(c,"left","メイン室");
+}
+
+function clickRoomR(x,y){
+  // Left arrow ← center
+  if(clickArrow(x,y,"left")){G.st=ST.ROOM;sClick();return}
+  // Filament rack
+  if(inR(x,y,{x:100,y:120,w:120,h:280})){
+    if(G.inv.some(i=>i.startsWith("fil_"))){sClick();msg("もうフィラメントを取った。");return}
+    G.st=ST.FILAMENT;sClick();return;
+  }
+  // Tool board
+  if(inR(x,y,{x:850,y:80,w:180,h:200})){sClick();msg("定規やニッパーなど各種工具が並んでいる。",0);return}
+  // Chess board on desk
+  let dk={x:840,y:380,w:200,h:70};
+  let cbx=dk.x+15,cby=dk.y,cbW=75;
+  if(inR(x,y,{x:cbx,y:cby-42,w:cbW,h:55})){
+    G.st=ST.CHESS;sClick();msg("チェスボードを調べる...",1500);return;
+  }
+  // Desk (not chess board)
+  if(inR(x,y,{x:dk.x,y:dk.y,w:dk.w,h:dk.h+80})){
+    if(deskDrawerOpen){
+      if(!G.inv.includes("power_cable")&&!prn.powered){
+        G.inv.push("power_cable");sOk();msg("電源ケーブルを手に入れた！",3000);return;
+      }
+      sClick();msg("引き出しの中は空だ。",0);return;
+    }
+    sClick();msg("机だ。上にチェスボードが置いてある。\n引き出しには鍵がかかっているようだ...",0);return;
+  }
+  // 3D Printer
+  let pr={x:W/2-130,y:220,w:260,h:230};
+  if(inR(x,y,pr)){
+    // Power cable connection
+    if(!prn.powered&&G.sel==="power_cable"){
+      prn.powered=true;
+      G.inv=G.inv.filter(i=>i!=="power_cable");G.sel=null;
+      sOk();msg("電源ケーブルを接続した。\n3Dプリンターの電源が入った！",3000);return;
+    }
+    if(!prn.powered){
+      sErr();msg("3Dプリンター「TUKUMANA X1」だ。\n電源ケーブルが接続されていない。\n電源ケーブルを探さないと...",0);return;
+    }
+    // Powered — filament logic
+    if(!G.inv.some(i=>i.startsWith("fil_"))&&!prn.filSet){
+      sClick();msg("3Dプリンターの電源は入っているが、\nフィラメントがセットされていないようだ。",0);return;
+    }
+    if(!prn.filSet&&G.sel&&G.sel.startsWith("fil_")){
+      let fi=parseInt(G.sel[4]);
+      prn.filSet=true;prn.filIdx=fi;
+      G.inv=G.inv.filter(i=>!i.startsWith("fil_"));G.sel=null;
+      sOk();msg("フィラメントをセットした。\n3Dモデルのデータを送ると、それを出力できるようになりました。",0);return;
+    }
+    if(!prn.filSet){
+      sClick();msg("フィラメントをセットしてください。\n持ち物でフィラメントを選択してからクリックしてください。",0);return;
+    }
+    sClick();msg("3Dプリンター — フィラメントセット済み。モデルデータを送信してください。");return;
+  }
+}
+
+// ==================== CHESS BOARD PUZZLE ====================
+
+function drawChess(c){
+  // Background
+  let bg=c.createRadialGradient(W/2,H/2,100,W/2,H/2,600);
+  bg.addColorStop(0,"#2a1f14");bg.addColorStop(1,"#0e0a06");
+  c.fillStyle=bg;c.fillRect(0,0,W,H);
+
+  // Title
+  c.fillStyle="#ddc";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";c.textBaseline="alphabetic";
+  c.fillText("♟ チェスボード",W/2,38);
+  c.fillStyle="#887";c.font='13px "Noto Sans JP"';
+  c.fillText("駒を動かしてみよう",W/2,60);
+
+  // Board layout
+  let sz=62; // square size
+  let brd=sz*8;
+  let ox=W/2-brd/2, oy=75;
+  let frame=10;
+
+  // Wooden frame
+  c.fillStyle="#5a3a18";c.fillRect(ox-frame,oy-frame,brd+frame*2,brd+frame*2);
+  c.fillStyle="#4a2e12";c.fillRect(ox-frame+3,oy-frame+3,brd+frame*2-6,brd+frame*2-6);
+  c.strokeStyle="#3a2008";c.lineWidth=2;c.strokeRect(ox-frame,oy-frame,brd+frame*2,brd+frame*2);
+
+  // Draw squares
+  for(let r=0;r<8;r++){
+    for(let cl=0;cl<8;cl++){
+      let sx=ox+cl*sz, sy=oy+r*sz;
+      let light=(r+cl)%2===0;
+      let isSel=chess.selR===r&&chess.selC===cl;
+      let isHov=inR(G.mx,G.my,{x:sx,y:sy,w:sz,h:sz});
+
+      if(isSel) c.fillStyle="#d4a030";
+      else if(isHov&&chess.selR>=0) c.fillStyle=light?"#c8e8a0":"#7aaa50";
+      else if(isHov) c.fillStyle=light?"#f0e8c0":"#a08860";
+      else c.fillStyle=light?"#e8d4a8":"#8b6b4a";
+
+      c.fillRect(sx,sy,sz,sz);
+
+      // Draw piece
+      let p=chess.board[r][cl];
+      if(p&&chessImg[p]&&chessImg[p].complete){
+        let psz=sz-8;
+        c.drawImage(chessImg[p],sx+(sz-psz)/2,sy+(sz-psz)/2,psz,psz);
+      }
+
+      // Selection glow
+      if(isSel){
+        c.save();
+        c.shadowColor="#ffcc00";c.shadowBlur=12;
+        c.strokeStyle="#ffcc00";c.lineWidth=3;
+        c.strokeRect(sx+2,sy+2,sz-4,sz-4);
+        c.restore();
+      }
+    }
+  }
+
+  // Board border
+  c.strokeStyle="#2a1a08";c.lineWidth=1;c.strokeRect(ox,oy,brd,brd);
+
+  // Rank/File labels
+  c.font='13px "Share Tech Mono"';c.textBaseline='middle';
+  let files='abcdefgh';
+  for(let i=0;i<8;i++){
+    c.fillStyle="#998";c.textAlign='center';
+    c.fillText(files[i],ox+i*sz+sz/2,oy+brd+frame+8);
+    c.fillText(8-i,ox-frame-10,oy+i*sz+sz/2);
+  }
+
+  // === Sticky note (bottom-right of board) ===
+  let snx=ox+brd+18, sny=oy+brd-110;
+  c.save();
+  c.translate(snx+45,sny+40);c.rotate(0.06);c.translate(-45,-40);
+  // Note shadow
+  c.fillStyle="rgba(0,0,0,.3)";c.fillRect(3,3,90,80);
+  // Note paper
+  c.fillStyle="#fff8a0";c.fillRect(0,0,90,80);
+  // Tape at top
+  c.fillStyle="rgba(200,200,180,.5)";c.fillRect(25,-5,40,12);
+  // Text
+  c.fillStyle="#c00";c.font='bold 16px "Noto Sans JP"';c.textAlign="center";c.textBaseline="middle";
+  c.fillText("窒息",45,30);
+  c.fillText("させよ",45,55);
+  c.restore();
+
+  // Back button
+  let bx=ox-frame,by=oy+brd+frame+22,bw=120,bh=38;
+  let bH=inR(G.mx,G.my,{x:bx,y:by,w:bw,h:bh});
+  c.fillStyle=bH?"#555":"#3a3a3a";c.fillRect(bx,by,bw,bh);
+  c.strokeStyle=bH?"#aaa":"#666";c.lineWidth=2;c.strokeRect(bx,by,bw,bh);
+  c.fillStyle="#ddd";c.font='16px "Noto Sans JP"';c.textAlign="center";c.textBaseline="middle";
+  c.fillText("← 戻る",bx+bw/2,by+bh/2);
+
+  // Hint if moved
+  if(chess.moved){
+    c.fillStyle="#8d8";c.font='14px "Noto Sans JP"';c.textAlign="center";c.textBaseline="alphabetic";
+    c.fillText("カチッ…引き出しのロックが外れた！",W/2,H-10);
+  }
+}
+
+function clickChess(x,y){
+  let sz=62;
+  let brd=sz*8;
+  let ox=W/2-brd/2, oy=75;
+  let frame=10;
+  // Back button
+  if(inR(x,y,{x:ox-frame,y:oy+brd+frame+22,w:120,h:38})){G.st=ST.ROOM_R;sClick();return}
+
+  // Find clicked square
+  if(x>=ox&&x<ox+brd&&y>=oy&&y<oy+brd){
+    let cl=Math.floor((x-ox)/sz);
+    let r=Math.floor((y-oy)/sz);
+    if(cl>=0&&cl<8&&r>=0&&r<8){
+      if(chess.selR<0){
+        if(chess.board[r][cl]){chess.selR=r;chess.selC=cl;sClick();}
+      } else {
+        if(chess.selR===r&&chess.selC===cl){
+          chess.selR=-1;chess.selC=-1;sClick();
+        } else {
+          // Check if this is the correct move: Ng5->f7 (row3,col6 -> row1,col5)
+          let fromR=chess.selR,fromC=chess.selC;
+          let piece=chess.board[fromR][fromC];
+          let isSmothered=(piece==='N'&&fromR===3&&fromC===6&&r===1&&cl===5);
+          if(isSmothered){
+            chess.board[r][cl]=chess.board[fromR][fromC];
+            chess.board[fromR][fromC]=null;
+            chess.selR=-1;chess.selC=-1;
+            sOk();
+            chess.moved=true;
+            deskDrawerOpen=true;
+            msg("ナイトをf7に動かした。\n窒息メイト（Smothered Mate）！\nカチッ…机の引き出しのロックが外れた！",0);
+          } else {
+            // Wrong move - reset selection, don't move
+            chess.selR=-1;chess.selC=-1;
+            sErr();
+            msg("その手では何も起こらない…\n付箋のヒントを考えてみよう。",3000);
+          }
+        }
+      }
+    }
+  }
+}
+
+// ==================== FILAMENT SELECTION ====================
+
+const filNames=["青","赤","緑","黄色","紫"];
+const filColors=["#4af","#f44","#4f4","#fa4","#f4f"];
+const filDark=["#28e","#c22","#2c2","#c80","#c2c"];
+
+function drawFilament(c){
+  // Dim background
+  c.fillStyle="rgba(0,0,0,.75)";c.fillRect(0,0,W,H);
+
+  // Panel
+  let pw=600,ph=400,px=W/2-pw/2,py=H/2-ph/2-20;
+  c.fillStyle="#1a1e2a";roundRect(c,px,py,pw,ph,12);c.fill();
+  c.strokeStyle="#0af";c.lineWidth=2;roundRect(c,px,py,pw,ph,12);c.stroke();
+
+  // Title
+  c.fillStyle="#0cf";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("フィラメントを選んでください",W/2,py+40);
+
+  c.fillStyle="#8ab";c.font='14px "Noto Sans JP"';
+  c.fillText("青、赤、緑、黄色、紫のフィラメントが保管されている。",W/2,py+70);
+
+  // Spool buttons
+  let spW=80,spH=120,gap=20;
+  let totalW=spW*5+gap*4;
+  let startX=W/2-totalW/2;
+  let spY=py+100;
+  for(let i=0;i<5;i++){
+    let sx=startX+i*(spW+gap);
+    let hov=inR(G.mx,G.my,{x:sx,y:spY,w:spW,h:spH});
+    // Button bg
+    c.fillStyle=hov?"#2a3040":"#141820";
+    roundRect(c,sx,spY,spW,spH,8);c.fill();
+    c.strokeStyle=hov?filColors[i]:"#333";
+    c.lineWidth=hov?2:1;
+    roundRect(c,sx,spY,spW,spH,8);c.stroke();
+    // Spool
+    c.strokeStyle=filColors[i];c.lineWidth=4;
+    c.beginPath();c.arc(sx+spW/2,spY+40,25,0,Math.PI*2);c.stroke();
+    c.strokeStyle=filDark[i];c.lineWidth=2;
+    c.beginPath();c.arc(sx+spW/2,spY+40,10,0,Math.PI*2);c.stroke();
+    // Inner spokes
+    for(let s=0;s<4;s++){
+      let a=s*Math.PI/2;
+      c.strokeStyle=filColors[i];c.lineWidth=1;
+      c.beginPath();
+      c.moveTo(sx+spW/2+Math.cos(a)*10,spY+40+Math.sin(a)*10);
+      c.lineTo(sx+spW/2+Math.cos(a)*25,spY+40+Math.sin(a)*25);
+      c.stroke();
+    }
+    // Label
+    c.fillStyle=hov?"#fff":"#aaa";c.font='bold 14px "Noto Sans JP"';c.textAlign="center";
+    c.fillText(filNames[i],sx+spW/2,spY+spH-10);
+  }
+
+  // Close button
+  c.fillStyle="#333";roundRect(c,W/2-60,py+ph-55,120,36,6);c.fill();
+  c.strokeStyle="#666";c.lineWidth=1;roundRect(c,W/2-60,py+ph-55,120,36,6);c.stroke();
+  c.fillStyle="#aaa";c.font='14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("戻る",W/2,py+ph-31);
+}
+
+function clickFilament(x,y){
+  let pw=600,ph=400,px=W/2-pw/2,py=H/2-ph/2-20;
+  // Spool buttons
+  let spW=80,spH=120,gap=20;
+  let totalW=spW*5+gap*4;
+  let startX=W/2-totalW/2;
+  let spY=py+100;
+  for(let i=0;i<5;i++){
+    let sx=startX+i*(spW+gap);
+    if(inR(x,y,{x:sx,y:spY,w:spW,h:spH})){
+      G.inv.push("fil_"+i);
+      G.st=ST.ROOM_R;sOk();
+      msg(filNames[i]+"のフィラメントを手に入れた！");
+      return;
+    }
+  }
+  // Close button
+  if(inR(x,y,{x:W/2-60,y:py+ph-55,w:120,h:36})){G.st=ST.ROOM_R;sClick();return}
+}
+
+// ==================== PASSCODE SCREEN ====================
+
+function drawPasscode(c){
+  let t=G.t;
+  c.fillStyle="#0a0a12";c.fillRect(0,0,W,H);
+  
+  // Monitor frame
+  let mx=W/2-260,my=40,mw=520,mh=500;
+  c.fillStyle="#111";roundRect(c,mx-10,my-10,mw+20,mh+20,12);c.fill();
+  c.fillStyle="#0a1a2a";roundRect(c,mx,my,mw,mh,8);c.fill();
+  c.strokeStyle="#1a3050";c.lineWidth=2;roundRect(c,mx,my,mw,mh,8);c.stroke();
+  // Monitor stand
+  c.fillStyle="#222";c.fillRect(W/2-30,my+mh+10,60,20);
+  c.fillRect(W/2-50,my+mh+28,100,8);
+  
+  // Lock icon
+  c.fillStyle="#0cf";c.font='48px sans-serif';c.textAlign="center";
+  c.fillText("🔒",W/2,my+80);
+  
+  // Title
+  c.fillStyle="#0cf";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("TukuCAD - パスコード入力",W/2,my+115);
+  c.fillStyle="#578";c.font='13px "Noto Sans JP"';
+  c.fillText("パスコードを入力してください",W/2,my+140);
+  
+  // Code display
+  let dw=320,dh=50,dx=W/2-dw/2,dy=my+155;
+  c.fillStyle="#001a00";roundRect(c,dx,dy,dw,dh,6);c.fill();
+  c.strokeStyle="#0f0";c.lineWidth=2;roundRect(c,dx,dy,dw,dh,6);c.stroke();
+  c.fillStyle="#0f0";c.font='bold 36px "Share Tech Mono"';c.textAlign="center";
+  let display=pcd.code.padEnd(7,"_").split("").join(" ");
+  c.fillText(display,W/2,dy+38);
+  
+  // Number pad (3x4 grid + bottom row)
+  let bw=70,bh=50,gap=8;
+  let totalW=bw*3+gap*2;
+  let bx=W/2-totalW/2,by=my+225;
+  let buttons=[
+    ["1","2","3"],
+    ["4","5","6"],
+    ["7","8","9"],
+    ["C","0","OK"]
+  ];
+  for(let r=0;r<4;r++){
+    for(let col=0;col<3;col++){
+      let px=bx+col*(bw+gap),py=by+r*(bh+gap);
+      let btnH=G.mx>px&&G.mx<px+bw&&G.my>py&&G.my<py+bh;
+      let label=buttons[r][col];
+      let bg=c.createLinearGradient(px,py,px,py+bh);
+      if(label==="OK"){
+        bg.addColorStop(0,btnH?"#1a6030":"#124820");
+        bg.addColorStop(1,btnH?"#0e4a20":"#0a3518");
+      }else if(label==="C"){
+        bg.addColorStop(0,btnH?"#6a2020":"#4a1010");
+        bg.addColorStop(1,btnH?"#5a1818":"#3a0808");
+      }else{
+        bg.addColorStop(0,btnH?"#2a4a6a":"#1a3050");
+        bg.addColorStop(1,btnH?"#1a3a5a":"#0e2040");
+      }
+      c.fillStyle=bg;roundRect(c,px,py,bw,bh,6);c.fill();
+      c.strokeStyle=label==="OK"?(btnH?"#0f0":"#0a0"):label==="C"?(btnH?"#f44":"#a22"):(btnH?"#0cf":"#068");
+      c.lineWidth=2;roundRect(c,px,py,bw,bh,6);c.stroke();
+      c.fillStyle="#fff";
+      c.font=label==="OK"||label==="C"?'bold 18px "Noto Sans JP"':'bold 26px "Share Tech Mono"';
+      c.textAlign="center";
+      c.fillText(label,px+bw/2,py+bh/2+10);
+    }
+  }
+  
+  // Back button (below monitor)
+  let bbx=W/2-60,bby=my+mh+40;
+  let bbH=inR(G.mx,G.my,{x:bbx,y:bby,w:120,h:36});
+  c.fillStyle=bbH?"#334":"#223";roundRect(c,bbx,bby,120,36,6);c.fill();
+  c.strokeStyle=bbH?"#8af":"#568";c.lineWidth=1.5;roundRect(c,bbx,bby,120,36,6);c.stroke();
+  c.fillStyle=bbH?"#cdf":"#9ab";c.font='bold 15px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("← 戻る",bbx+60,bby+25);
+}
+
+function clickPasscode(x,y){
+  let mx=W/2-260,my=40,mw=520,mh=500;
+  // Number pad
+  let bw=70,bh=50,gap=8;
+  let totalW=bw*3+gap*2;
+  let bx=W/2-totalW/2,by=my+225;
+  for(let r=0;r<4;r++){
+    for(let col=0;col<3;col++){
+      let px=bx+col*(bw+gap),py=by+r*(bh+gap);
+      if(x>px&&x<px+bw&&y>py&&y<py+bh){
+        let labels=[["1","2","3"],["4","5","6"],["7","8","9"],["C","0","OK"]];
+        let label=labels[r][col];
+        if(label==="C"){pcd.code="";sClick()}
+        else if(label==="OK"){checkPasscode()}
+        else if(pcd.code.length<7){pcd.code+=label;sClick()}
+        return;
+      }
+    }
+  }
+  // Back button
+  let bbx=W/2-60,bby=my+mh+40;
+  if(inR(x,y,{x:bbx,y:bby,w:120,h:36})){G.st=ST.ROOM_L;pcd.code="";sClick();return}
+}
+
+function checkPasscode(){
+  if(pcd.code===pcd.target){
+    G.pcUnlocked=true;sUnlock();
+    msg("パスコードが正しい！PCのロックが解除されました！",3000);
+    setTimeout(()=>{
+      G.st=ST.MODEL;mdl.parts=[];mdl.selIdx=-1;mdl.rot=0;
+      msg("TukuCADを起動...");
+    },1200);
+  }else{
+    sErr();msg("パスコードが違います...");pcd.code="";
+  }
+}
+
+// ==================== MODELING SCREEN ====================
+
+function drawModel(c){
+  let t=G.t;
+  // Background
+  c.fillStyle="#0b1520";c.fillRect(0,0,W,H-INV_H);
+  
+  // === Left Toolbar ===
+  let tw=200;
+  let tg=c.createLinearGradient(0,0,tw,0);
+  tg.addColorStop(0,"#101828");tg.addColorStop(1,"#0c1520");
+  c.fillStyle=tg;c.fillRect(0,0,tw,H-INV_H);
+  c.strokeStyle="#1a3050";c.lineWidth=2;
+  c.beginPath();c.moveTo(tw,0);c.lineTo(tw,H-INV_H);c.stroke();
+  
+  // Toolbar title
+  c.fillStyle="#0cf";c.font='bold 18px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("TukuCAD",tw/2,32);
+  c.fillStyle="#068";c.font='11px "Noto Sans JP"';
+  c.fillText("3Dモデリング",tw/2,50);
+  
+  // Separator
+  c.strokeStyle="#1a3050";c.lineWidth=1;c.beginPath();c.moveTo(10,65);c.lineTo(tw-10,65);c.stroke();
+  
+  // Section: テンプレート
+  c.fillStyle="#08a";c.font='bold 13px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("▼ テンプレート",12,85);
+  
+  let ty=100;
+  for(let[k,v]of Object.entries(mdl.tpl)){
+    let placed=k==="tooth"?mdl.parts.filter(p=>p.k===k).length>=2:mdl.parts.some(p=>p.k===k);
+    let bh=inR(G.mx,G.my,{x:12,y:ty,w:tw-24,h:48});
+    // Button bg
+    let bg=c.createLinearGradient(12,ty,12,ty+48);
+    if(placed){
+      bg.addColorStop(0,"#0a2a18");bg.addColorStop(1,"#082010");
+    }else{
+      bg.addColorStop(0,bh?"#1a3a5a":"#12283e");bg.addColorStop(1,bh?"#143050":"#0e2030");
+    }
+    c.fillStyle=bg;
+    roundRect(c,12,ty,tw-24,48,6);c.fill();
+    c.strokeStyle=placed?"#0a4":bh?"#0cf":"#1a3050";c.lineWidth=1.5;
+    roundRect(c,12,ty,tw-24,48,6);c.stroke();
+    // Icon preview
+    c.fillStyle=placed?"#0a6":v.col;
+    if(k==="head")c.fillRect(22,ty+10,28,28);
+    else if(k==="shaft")c.fillRect(22,ty+18,40,12);
+    else{c.fillRect(22,ty+22,12,10);c.fillRect(38,ty+22,12,10)}
+    // Text
+    let toothCount=k==="tooth"?mdl.parts.filter(p=>p.k===k).length:0;
+    c.fillStyle=placed?"#0c8":"#fff";c.font='bold 14px "Noto Sans JP"';c.textAlign="left";
+    c.fillText(placed?"✓ "+v.label:(k==="tooth"&&toothCount===1?v.label+" ("+toothCount+"/2)":v.label),60,ty+22);
+    c.fillStyle=placed?"#086":"#89a";c.font='11px "Noto Sans JP"';
+    c.fillText(placed?"配置済み":(k==="tooth"&&toothCount===1?"あと１つ！":v.desc),60,ty+40);
+    ty+=62;
+  }
+  
+  // Separator
+  c.strokeStyle="#1a3050";c.beginPath();c.moveTo(10,ty+10);c.lineTo(tw-10,ty+10);c.stroke();
+  
+  // Info section
+  c.fillStyle="#08a";c.font='bold 13px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("▼ 操作ガイド",12,ty+30);
+  c.fillStyle="#578";c.font='12px "Noto Sans JP"';
+  let guides=["テンプレートをクリック","→ 自動で正しい位置に配置","歯は2回クリック！","4つ全て配置したら","STLエクスポート！"];
+  for(let i=0;i<guides.length;i++){
+    c.fillText("• "+guides[i],16,ty+52+i*20);
+  }
+  
+  // Part count
+  c.fillStyle="#0af";c.font='bold 13px "Noto Sans JP"';c.textAlign="center";
+  c.fillText(`配置パーツ: ${mdl.parts.length}`,tw/2,H-INV_H-20);
+  
+  // === Top bar ===
+  c.fillStyle="#0e1a28";c.fillRect(tw,0,W-tw,60);
+  c.strokeStyle="#1a3050";c.lineWidth=1;
+  c.beginPath();c.moveTo(tw,60);c.lineTo(W,60);c.stroke();
+  
+  // File info
+  c.fillStyle="#578";c.font='12px "Share Tech Mono"';c.textAlign="left";
+  c.fillText("key_model.stl    パーツ: "+mdl.parts.length+"/4",tw+15,38);
+  
+  // Export button
+  let exH=G.mx>W-260&&G.mx<W-110&&G.my>12&&G.my<52;
+  let eg=c.createLinearGradient(W-260,12,W-260,52);
+  eg.addColorStop(0,exH?"#1a6030":"#124820");eg.addColorStop(1,exH?"#0e4a20":"#0a3518");
+  c.fillStyle=eg;roundRect(c,W-260,12,150,40,6);c.fill();
+  c.strokeStyle=exH?"#0f0":"#0a0";c.lineWidth=2;roundRect(c,W-260,12,150,40,6);c.stroke();
+  c.fillStyle="#fff";c.font='bold 15px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("📦 STLエクスポート",W-185,38);
+  
+  // Close button
+  let clH=G.mx>W-90&&G.mx<W-10&&G.my>12&&G.my<52;
+  c.fillStyle=clH?"#6a1020":"#4a0a15";roundRect(c,W-90,12,80,40,6);c.fill();
+  c.strokeStyle=clH?"#f44":"#a22";c.lineWidth=2;roundRect(c,W-90,12,80,40,6);c.stroke();
+  c.fillStyle="#fff";c.fillText("✕ 閉じる",W-50,38);
+  
+  // === Grid area ===
+  let gx0=tw,gy0=60,gw=W-tw,gh=H-INV_H-60;
+  let gcx=gx0+gw/2,gcy=gy0+gh/2;
+  let gs=mdl.gs;
+  
+  // Dot grid
+  c.fillStyle="rgba(0,150,200,.15)";
+  for(let i=-20;i<=20;i++){
+    for(let j=-15;j<=15;j++){
+      let px=gcx+i*gs,py=gcy+j*gs;
+      if(px>gx0&&px<W&&py>gy0&&py<H-INV_H){
+        c.fillRect(px-1,py-1,2,2);
+      }
+    }
+  }
+  
+  // Axis lines
+  c.strokeStyle="rgba(255,60,60,.3)";c.lineWidth=1;
+  c.beginPath();c.moveTo(gcx-400,gcy);c.lineTo(gcx+400,gcy);c.stroke();
+  c.strokeStyle="rgba(60,255,60,.3)";
+  c.beginPath();c.moveTo(gcx,gcy-300);c.lineTo(gcx,gcy+300);c.stroke();
+  // Axis labels
+  c.fillStyle="rgba(255,60,60,.5)";c.font='12px "Share Tech Mono"';c.textAlign="left";c.fillText("X",gcx+390,gcy-5);
+  c.fillStyle="rgba(60,255,60,.5)";c.textAlign="center";c.fillText("Y",gcx+5,gcy-290);
+  
+  // Draw placed parts with isometric-ish 3D look
+  for(let i=0;i<mdl.parts.length;i++){
+    let p=mdl.parts[i];
+    let sel=i===mdl.selIdx;
+    drawIsoPart(c,p,sel,t);
+  }
+  
+
+}
+
+function drawIsoPart(c,p,sel,t){
+  let gs=mdl.gs;
+  let pw=p.w*gs,ph=p.h*gs;
+  let depth=12;
+  let x=p.px,y=p.py;
+  
+  c.save();c.translate(x,y);
+  
+  // Shadow
+  c.fillStyle="rgba(0,0,0,.3)";
+  c.fillRect(-pw/2+4,ph/2+2,pw,6);
+  
+  // Right face
+  c.fillStyle=sel?"#1a5a8a":p.colR;
+  c.beginPath();
+  c.moveTo(pw/2,-ph/2);c.lineTo(pw/2+depth,-ph/2-depth*.6);
+  c.lineTo(pw/2+depth,ph/2-depth*.6);c.lineTo(pw/2,ph/2);
+  c.closePath();c.fill();
+  
+  // Top face
+  c.fillStyle=sel?"#4ab0ff":p.col;
+  c.beginPath();
+  c.moveTo(-pw/2,-ph/2);c.lineTo(-pw/2+depth,-ph/2-depth*.6);
+  c.lineTo(pw/2+depth,-ph/2-depth*.6);c.lineTo(pw/2,-ph/2);
+  c.closePath();c.fill();
+  
+  // Front face
+  c.fillStyle=sel?"#2a80c0":p.colD;
+  c.fillRect(-pw/2,-ph/2,pw,ph);
+  
+  // Grid lines on front face
+  c.strokeStyle="rgba(255,255,255,.08)";c.lineWidth=.5;
+  for(let gx=-pw/2+gs;gx<pw/2;gx+=gs){c.beginPath();c.moveTo(gx,-ph/2);c.lineTo(gx,ph/2);c.stroke()}
+  for(let gy=-ph/2+gs;gy<ph/2;gy+=gs){c.beginPath();c.moveTo(-pw/2,gy);c.lineTo(pw/2,gy);c.stroke()}
+  
+  // Outline
+  c.strokeStyle=sel?"#ff0":"rgba(0,200,255,.5)";c.lineWidth=sel?2.5:1;
+  c.strokeRect(-pw/2,-ph/2,pw,ph);
+  
+  // Selection handles
+  if(sel){
+    let hs=5;
+    c.fillStyle="#ff0";
+    for(let hx of[-pw/2,pw/2]){for(let hy of[-ph/2,ph/2]){c.fillRect(hx-hs/2,hy-hs/2,hs,hs)}}
+    // Pulse
+    c.strokeStyle=`rgba(255,255,0,${.3+Math.sin(t*.005)*.2})`;c.lineWidth=1;
+    c.strokeRect(-pw/2-4,-ph/2-4,pw+8,ph+8);
+  }
+  
+  // Label
+  c.fillStyle=sel?"#ff0":"#8cf";c.font='bold 11px "Noto Sans JP"';c.textAlign="center";
+  c.fillText(mdl.tpl[p.k].label,0,ph/2+16);
+  
+  c.restore();
+}
+
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);
+  c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);
+  c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();
+}
+
+// ==================== SLICER SCREEN ====================
+
+function drawSlice(c){
+  let t=G.t;
+  // Background
+  c.fillStyle="#080c14";c.fillRect(0,0,W,H-INV_H);
+  
+  // Title bar
+  let tbg=c.createLinearGradient(0,0,0,60);
+  tbg.addColorStop(0,"#101828");tbg.addColorStop(1,"#0c1420");
+  c.fillStyle=tbg;c.fillRect(0,0,W,60);
+  c.strokeStyle="#1a3050";c.lineWidth=1;
+  c.beginPath();c.moveTo(0,60);c.lineTo(W,60);c.stroke();
+  
+  c.fillStyle="#0cf";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("🔪 つくまなスライサー",W/2,40);
+  
+  // Back button
+  let bkH=G.mx>W-90&&G.mx<W-10&&G.my>12&&G.my<52;
+  c.fillStyle=bkH?"#6a1020":"#4a0a15";roundRect(c,W-90,12,80,40,6);c.fill();
+  c.strokeStyle=bkH?"#f44":"#a22";c.lineWidth=2;roundRect(c,W-90,12,80,40,6);c.stroke();
+  c.fillStyle="#fff";c.font='bold 14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("← 戻る",W-50,38);
+  
+  // === Left info panel ===
+  c.fillStyle="#0c1420";c.fillRect(0,60,200,H-60-INV_H);
+  c.strokeStyle="#1a3050";c.lineWidth=1;
+  c.beginPath();c.moveTo(200,60);c.lineTo(200,H-INV_H);c.stroke();
+  
+  c.fillStyle="#08a";c.font='bold 13px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("▼ モデル情報",12,90);
+  c.fillStyle="#578";c.font='12px "Noto Sans JP"';
+  c.fillText("ファイル: key_model.stl",12,115);
+  c.fillText(`レイヤー高: 0.2mm`,12,135);
+  c.fillText(`総レイヤー: ${slc.total}`,12,155);
+  c.fillText(`推定時間: 12分`,12,175);
+  c.fillText(`フィラメント: 3.2g`,12,195);
+  c.fillText(`ノズル温度: 210℃`,12,215);
+  c.fillText(`ベッド温度: 60℃`,12,235);
+  
+  // Support checkbox
+  let cbx=14,cby=250,cbs=22;
+  let cbHov=G.mx>10&&G.mx<190&&G.my>246&&G.my<280;
+  c.fillStyle=cbHov?"#1a2a3a":"#0e1820";
+  c.fillRect(cbx,cby,cbs,cbs);
+  c.strokeStyle=slc.support?"#0f0":cbHov?"#0cf":"#3a5060";
+  c.lineWidth=2;c.strokeRect(cbx,cby,cbs,cbs);
+  if(slc.support){
+    c.fillStyle="#0f0";c.font='bold 18px sans-serif';c.textAlign="center";
+    c.fillText("✓",cbx+cbs/2,cby+cbs-4);
+  }
+  c.fillStyle=slc.support?"#0f0":cbHov?"#acc":"#578";
+  c.font='bold 15px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("サポートを有効",cbx+cbs+6,cby+17);
+  
+  // Gcode preview
+  if(slc.done){
+    c.fillStyle="#08a";c.font='bold 13px "Noto Sans JP"';
+    c.fillText("▼ Gコード",12,295);
+    c.fillStyle="#0a0";c.font='10px "Share Tech Mono"';
+    let startLine=Math.max(0,slc.layer*3);
+    for(let i=0;i<7&&startLine+i<slc.gc.length;i++){
+      c.fillText(slc.gc[startLine+i].substring(0,25),8,315+i*14);
+    }
+  }
+  
+  // === Main view area ===
+  let vx=220,vy=80,vw=780,vh=440;
+  c.fillStyle="#0a0e18";c.fillRect(vx,vy,vw,vh);
+  c.strokeStyle="#1a3050";c.lineWidth=2;c.strokeRect(vx,vy,vw,vh);
+  
+  // Grid in view
+  c.strokeStyle="rgba(0,100,150,.1)";c.lineWidth=.5;
+  for(let gx=vx;gx<=vx+vw;gx+=30){c.beginPath();c.moveTo(gx,vy);c.lineTo(gx,vy+vh);c.stroke()}
+  for(let gy=vy;gy<=vy+vh;gy+=30){c.beginPath();c.moveTo(vx,gy);c.lineTo(vx+vw,gy);c.stroke()}
+  
+  // Draw key cross-section
+  let layerPct=slc.layer/slc.total;
+  let kcx=vx+vw/2-80,kcy=vy+vh/2;
+  
+  // The key shape (top-down cross section at current layer)
+  c.save();
+  c.beginPath();c.rect(vx+1,vy+1,vw-2,vh-2);c.clip();
+  
+  // Draw build plate outline
+  c.strokeStyle="rgba(100,100,150,.3)";c.lineWidth=1;c.setLineDash([5,5]);
+  c.strokeRect(kcx-20,kcy-80,320,160);c.setLineDash([]);
+  
+  // Key head (always visible)
+  c.fillStyle="rgba(60,165,245,.6)";
+  c.strokeStyle="rgba(60,165,245,.9)";c.lineWidth=1.5;
+  c.fillRect(kcx,kcy-40,70,80);c.strokeRect(kcx,kcy-40,70,80);
+  // Hole in key head
+  c.fillStyle="#0a0e18";
+  c.beginPath();c.arc(kcx+35,kcy,12,0,Math.PI*2);c.fill();
+  c.strokeStyle="rgba(60,165,245,.9)";c.stroke();
+  
+  // Key shaft
+  c.fillStyle="rgba(60,165,245,.6)";
+  c.strokeStyle="rgba(60,165,245,.9)";
+  c.fillRect(kcx+70,kcy-15,180,30);c.strokeRect(kcx+70,kcy-15,180,30);
+  
+  // Key teeth (2 teeth matching the modeled key)
+  let teeth=[{x:kcx+120,h:25},{x:kcx+170,h:25}];
+  for(let tooth of teeth){
+    c.fillRect(tooth.x,kcy+15,20,tooth.h);c.strokeRect(tooth.x,kcy+15,20,tooth.h);
+  }
+  
+  // Layer lines overlay
+  c.strokeStyle="rgba(0,255,255,.15)";c.lineWidth=.5;
+  for(let i=0;i<40;i++){
+    let ly=kcy-50+i*3;
+    c.beginPath();c.moveTo(kcx-10,ly);c.lineTo(kcx+270,ly);c.stroke();
+  }
+  
+  // Current layer highlight line
+  let clY=kcy-50+layerPct*100;
+  c.strokeStyle="#ff0";c.lineWidth=2;c.setLineDash([8,4]);
+  c.beginPath();c.moveTo(vx,clY);c.lineTo(vx+vw,clY);c.stroke();
+  c.setLineDash([]);
+  c.fillStyle="#ff0";c.font='12px "Share Tech Mono"';c.textAlign="left";
+  c.fillText(`Z=${(slc.layer*0.2).toFixed(1)}mm`,vx+10,clY-5);
+  
+  // Infill pattern (crosshatch)
+  c.save();c.globalAlpha=.15;c.strokeStyle="#0af";c.lineWidth=.5;
+  for(let i=-20;i<30;i++){
+    c.beginPath();c.moveTo(kcx+i*12,kcy-50);c.lineTo(kcx+i*12+50,kcy+50);c.stroke();
+    c.beginPath();c.moveTo(kcx+i*12+50,kcy-50);c.lineTo(kcx+i*12,kcy+50);c.stroke();
+  }
+  c.restore();
+  
+  c.restore();// clip
+  
+  // === Layer slider ===
+  let slX=W-55,slY=100,slH=420;
+  c.fillStyle="#1a1e2a";c.fillRect(slX-8,slY,26,slH);
+  c.strokeStyle="#2a3050";c.lineWidth=1;c.strokeRect(slX-8,slY,26,slH);
+  // Track
+  let trackG=c.createLinearGradient(slX,slY,slX,slY+slH);
+  trackG.addColorStop(0,"#005");trackG.addColorStop(1,"#050");
+  c.fillStyle=trackG;c.fillRect(slX,slY+5,10,slH-10);
+  // Filled portion
+  let slPos=slY+5+(slc.layer/slc.total)*(slH-10);
+  c.fillStyle="#0af";c.fillRect(slX,slY+5,10,slPos-slY-5);
+  // Handle
+  c.fillStyle="#0cf";
+  roundRect(c,slX-10,slPos-10,30,20,4);c.fill();
+  c.strokeStyle="#fff";c.lineWidth=1;roundRect(c,slX-10,slPos-10,30,20,4);c.stroke();
+  c.fillStyle="#000";c.font='bold 9px "Share Tech Mono"';c.textAlign="center";
+  c.fillText(slc.layer,slX+5,slPos+4);
+  // Labels
+  c.fillStyle="#578";c.font='11px "Noto Sans JP"';
+  c.fillText("0",slX+5,slY-5);c.fillText(slc.total,slX+5,slY+slH+15);
+  
+  // Current layer display
+  c.fillStyle="#fff";c.font='bold 16px "Noto Sans JP"';c.textAlign="right";
+  c.fillText(`レイヤー: ${slc.layer} / ${slc.total}`,W-80,80);
+  c.fillStyle="#578";c.font='12px "Share Tech Mono"';
+  c.fillText(`Z: ${(slc.layer*0.2).toFixed(1)} / ${(slc.total*0.2).toFixed(1)} mm`,W-80,96);
+  
+  // === Bottom buttons ===
+  if(!slc.done){
+    if(slc.slicing){
+      // Progress bar
+      c.fillStyle="#1a1e2a";roundRect(c,W/2-180,H-140,360,35,6);c.fill();
+      c.fillStyle="#0a4";roundRect(c,W/2-180,H-140,360*(slc.prog/100),35,6);c.fill();
+      c.strokeStyle="#0f0";c.lineWidth=2;roundRect(c,W/2-180,H-140,360,35,6);c.stroke();
+      c.fillStyle="#fff";c.font='bold 15px "Noto Sans JP"';c.textAlign="center";
+      c.fillText(`スライス中... ${Math.floor(slc.prog)}%`,W/2,H-117);
+    }else{
+      let sbH=G.mx>W/2-110&&G.mx<W/2+110&&G.my>H-140&&G.my<H-95;
+      let sg=c.createLinearGradient(W/2-110,H-140,W/2-110,H-95);
+      sg.addColorStop(0,sbH?"#1a6030":"#124820");sg.addColorStop(1,sbH?"#0e4a20":"#0a3518");
+      c.fillStyle=sg;roundRect(c,W/2-110,H-140,220,45,8);c.fill();
+      c.strokeStyle=sbH?"#0f0":"#0a0";c.lineWidth=2;roundRect(c,W/2-110,H-140,220,45,8);c.stroke();
+      c.fillStyle="#fff";c.font='bold 18px "Noto Sans JP"';c.textAlign="center";
+      c.fillText("🔪 スライス開始",W/2,H-110);
+    }
+  }else{
+    let spH=G.mx>W/2-130&&G.mx<W/2+130&&G.my>H-140&&G.my<H-95;
+    let pg=c.createLinearGradient(W/2-130,H-140,W/2-130,H-95);
+    pg.addColorStop(0,spH?"#1a3060":"#122248");pg.addColorStop(1,spH?"#0e2850":"#0a1a38");
+    c.fillStyle=pg;roundRect(c,W/2-130,H-140,260,45,8);c.fill();
+    c.strokeStyle=spH?"#0cf":"#068";c.lineWidth=2;roundRect(c,W/2-130,H-140,260,45,8);c.stroke();
+    c.fillStyle="#fff";c.font='bold 18px "Noto Sans JP"';c.textAlign="center";
+    c.fillText("🖨️ 3Dプリンターに送信",W/2,H-110);
+    // Checkmark
+    c.fillStyle="#0f0";c.font='14px "Noto Sans JP"';
+    c.fillText("✓ スライス完了",W/2,H-82);
+  }
+}
+
+// ==================== 3D PRINTER ANIMATION ====================
+
+function drawPrint(c){
+  let t=G.t;
+  // Background
+  c.fillStyle="#080c14";c.fillRect(0,0,W,H-INV_H);
+  
+  // Title
+  c.fillStyle="#0cf";c.font='bold 26px "Noto Sans JP"';c.textAlign="center";
+  let dots=".".repeat(Math.floor(t*.003)%4);
+  c.fillText(`🖨️ 3Dプリント中${dots}`,W/2,45);
+  
+  // Status info
+  c.fillStyle="#578";c.font='14px "Share Tech Mono"';
+  c.fillText(`ノズル: 210℃ | ベッド: 60℃ | ファン: 100%`,W/2,68);
+  
+  // === Printer outline ===
+  let px=W/2-280,py=90,pw=560,ph=420;
+  
+  // Printer background
+  c.fillStyle="#0e1220";c.fillRect(px,py,pw,ph);
+  c.strokeStyle="#2a3050";c.lineWidth=4;c.strokeRect(px,py,pw,ph);
+  
+  // Frame
+  c.fillStyle="#2a2e40";
+  c.fillRect(px+15,py+15,15,ph-30); // Left upright
+  c.fillRect(px+pw-30,py+15,15,ph-30); // Right upright  
+  c.fillRect(px+15,py+15,pw-30,15); // Top bar
+  
+  // Build plate & key height
+  let buildPct=prn.layer/prn.total;
+  
+  // Build plate
+  let bedY=py+ph-80;
+  c.fillStyle="#444860";c.fillRect(px+50,bedY,pw-100,12);
+  // Heated bed indicator
+  c.fillStyle="rgba(255,80,0,.15)";c.fillRect(px+50,bedY+2,pw-100,8);
+  // Bed clips
+  c.fillStyle="#667";
+  c.fillRect(px+55,bedY-3,15,5);c.fillRect(px+pw-70,bedY-3,15,5);
+  
+  // === 鍵をレイヤーごとに積層印刷 ===
+  let keyCX=px+pw/2, keyW=280;
+  let totalExtH=50; // 積層総高さ（px）
+  let layersBuilt=prn.layer;
+  let lh=totalExtH/prn.total; // 1レイヤーあたりの高さ
+  let topOfKey=bedY-layersBuilt*lh; // 現在の鍵の一番上
+  
+  // Filament color for key layers
+  let fci=prn.filIdx!=null?prn.filIdx:0;
+  let fcMain=filColors[fci];
+  let fcDark=filDark[fci];
+
+  for(let i=0;i<layersBuilt;i++){
+    let ly=bedY-(i+1)*lh;
+    let alpha=.65+(i/prn.total)*.35;
+    c.globalAlpha=alpha;
+    c.fillStyle=fcMain;
+    c.strokeStyle=fcDark;
+    c.lineWidth=0.5;
+    
+    // キーヘッド（頭部）
+    let bowX=keyCX-keyW/2, bowW=70;
+    c.fillRect(bowX,ly,bowW,lh+0.5);
+    c.strokeRect(bowX,ly,bowW,lh+0.5);
+    // ヘッドの穴
+    c.globalAlpha=1;
+    c.fillStyle="#0e1220";
+    c.beginPath();c.arc(bowX+bowW/2,ly+lh/2,12,0,Math.PI*2);c.fill();
+    c.globalAlpha=alpha;
+    c.fillStyle=fcMain;
+    
+    // シャフト（軸）
+    let shaftX=bowX+bowW, shaftW=160, shaftTop=bedY-totalExtH*0.7;
+    let shaftBot=bedY-totalExtH*0.3;
+    if(ly>=shaftTop&&ly<=shaftBot){
+      c.fillRect(shaftX,ly,shaftW,lh+0.5);
+      c.strokeRect(shaftX,ly,shaftW,lh+0.5);
+    }
+    
+    // キー歯（2本、下部）
+    let teethTop=bedY-totalExtH*0.3;
+    if(ly>=teethTop){
+      c.fillRect(shaftX+60,ly,22,lh+0.5);
+      c.strokeRect(shaftX+60,ly,22,lh+0.5);
+      c.fillRect(shaftX+110,ly,22,lh+0.5);
+      c.strokeRect(shaftX+110,ly,22,lh+0.5);
+    }
+  }
+  c.globalAlpha=1;
+  
+  // 最新レイヤーの発光エフェクト
+  if(prn.on&&layersBuilt>0){
+    c.fillStyle="rgba(255,200,0,.4)";
+    c.fillRect(keyCX-keyW/2-5,topOfKey-1,keyW+10,3);
+  }
+  
+  // === ガントリー（ノズルの高さに連動：下から上へ） ===
+  // ノズルは常に現在印刷中のレイヤーのすぐ上にいる
+  let gantryY=layersBuilt>0?topOfKey-18:bedY-18;
+  c.fillStyle="#3a3e55";c.fillRect(px+28,gantryY,pw-56,10);
+  
+  // === エクストルーダーヘッド ===
+  prn.hx+=prn.dir*4;
+  if(prn.hx>pw-160||prn.hx<40){prn.dir*=-1;prn.hx=Math.max(40,Math.min(pw-160,prn.hx))}
+  
+  let hx=px+prn.hx;
+  let hy=gantryY-28;
+  
+  if(prn.on){
+    // エクストルーダー本体
+    c.fillStyle="#ff7700";
+    roundRect(c,hx,hy,42,28,4);c.fill();
+    // ヒートシンクフィン
+    c.fillStyle="#cc5500";
+    for(let f=0;f<4;f++)c.fillRect(hx+5+f*9,hy-4,7,4);
+    // ノズル
+    c.fillStyle="#ffaa00";
+    c.beginPath();c.moveTo(hx+15,hy+28);c.lineTo(hx+27,hy+28);c.lineTo(hx+24,hy+38);c.lineTo(hx+18,hy+38);c.closePath();c.fill();
+    // ノズル熱光
+    let hg=c.createRadialGradient(hx+21,hy+42,0,hx+21,hy+42,20);
+    hg.addColorStop(0,"rgba(255,150,0,.4)");hg.addColorStop(1,"rgba(255,100,0,0)");
+    c.fillStyle=hg;c.beginPath();c.arc(hx+21,hy+42,20,0,Math.PI*2);c.fill();
+    // フィラメントライン
+    let filC=prn.filIdx!=null?filColors[prn.filIdx]:"#0af";
+    c.strokeStyle=filC;c.lineWidth=2;
+    c.beginPath();c.moveTo(hx+21,hy);c.quadraticCurveTo(hx+21,hy-30,px+pw-60,py+50);c.stroke();
+  }
+  
+  // Filament spool on side
+  {let filC=prn.filIdx!=null?filColors[prn.filIdx]:"#0af";
+  let filD=prn.filIdx!=null?filDark[prn.filIdx]:"rgba(0,170,255,.3)";
+  c.strokeStyle=filC;c.lineWidth=3;
+  c.beginPath();c.arc(px+pw-45,py+45,22,0,Math.PI*2);c.stroke();
+  c.beginPath();c.arc(px+pw-45,py+45,8,0,Math.PI*2);c.stroke();
+  // Spool rotation
+  let sr=t*.002;
+  c.strokeStyle=filD;c.lineWidth=1;
+  for(let s=0;s<4;s++){
+    let sa=sr+s*Math.PI/2;
+    c.beginPath();c.moveTo(px+pw-45+Math.cos(sa)*8,py+45+Math.sin(sa)*8);
+    c.lineTo(px+pw-45+Math.cos(sa)*22,py+45+Math.sin(sa)*22);c.stroke();
+  }}
+  
+  // Status LEDs
+  c.fillStyle=prn.on?"rgba(0,255,0,"+(.5+Math.sin(t*.01)*.3)+")":"#0f0";
+  c.beginPath();c.arc(px+30,py+50,5,0,Math.PI*2);c.fill();
+  c.fillStyle="rgba(255,100,0,"+(.5+Math.sin(t*.008)*.3)+")";
+  c.beginPath();c.arc(px+30,py+65,5,0,Math.PI*2);c.fill();
+  
+  // LCD
+  c.fillStyle="#001800";roundRect(c,px+40,py+ph-40,120,30,3);c.fill();
+  c.fillStyle="#0f0";c.font='bold 11px "Share Tech Mono"';c.textAlign="left";
+  c.fillText(`L:${prn.layer}/${prn.total}`,px+48,py+ph-22);
+  c.fillText(`${Math.floor(prn.prog)}%`,px+120,py+ph-22);
+  
+  // Brand
+  c.fillStyle="#445";c.font='bold 12px "Share Tech Mono"';c.textAlign="center";
+  c.fillText("TUKUMANA X1C",px+pw/2,py+ph+18);
+  
+  // === Progress bar ===
+  let pbx=W/2-220,pby=H-130,pbw=440,pbh=30;
+  c.fillStyle="#1a1e2a";roundRect(c,pbx,pby,pbw,pbh,6);c.fill();
+  // Fill
+  let pg=c.createLinearGradient(pbx,pby,pbx+pbw*prn.prog/100,pby);
+  pg.addColorStop(0,"#0a4");pg.addColorStop(1,"#0f0");
+  c.fillStyle=pg;roundRect(c,pbx,pby,pbw*(prn.prog/100),pbh,6);c.fill();
+  c.strokeStyle="#0f0";c.lineWidth=2;roundRect(c,pbx,pby,pbw,pbh,6);c.stroke();
+  // Percentage
+  c.fillStyle="#fff";c.font='bold 16px "Share Tech Mono"';c.textAlign="center";
+  c.fillText(`${Math.floor(prn.prog)}%`,W/2,pby+21);
+  // Layer info
+  c.fillStyle="#8af";c.font='14px "Noto Sans JP"';
+  c.fillText(`レイヤー ${prn.layer} / ${prn.total} | 残り約${Math.max(0,Math.ceil((100-prn.prog)/100*12))}分`,W/2,pby+50);
+  
+  // === Update state ===
+  if(prn.on&&prn.prog<100){
+    prn.prog+=.4;
+    prn.layer=Math.floor(prn.prog/100*prn.total);
+    if(Math.random()<.08)sPrint();
+    if(prn.prog>=100){
+      prn.on=false;
+      setTimeout(()=>{
+        G.inv.push("key");G.st=ST.ROOM_R;sOk();
+        msg("✓ 鍵の印刷が完了！持ち物に追加されました。鍵を選択してドアに使おう！",4000);
+      },800);
+    }
+  }
+}
+
+// ==================== ROOM 2 DRAWING ====================
+
+function drawRoom2(c){
+  let t=G.t;
+  // Back wall (same style as Room 1)
+  let wg=c.createLinearGradient(0,0,0,420);
+  wg.addColorStop(0,"#f5f5f0");wg.addColorStop(1,"#e8e8e3");
+  c.fillStyle=wg;c.fillRect(0,0,W,420);
+  
+  // Wall texture lines
+  c.strokeStyle="rgba(0,0,0,.03)";c.lineWidth=1;
+  for(let i=0;i<W;i+=40){c.beginPath();c.moveTo(i,0);c.lineTo(i,420);c.stroke()}
+  
+  // Floor
+  let fg=c.createLinearGradient(0,420,0,H-INV_H);
+  fg.addColorStop(0,"#d5d5d0");fg.addColorStop(1,"#c0c0bb");
+  c.fillStyle=fg;c.fillRect(0,420,W,H-420-INV_H);
+  
+  // Floor tiles
+  c.strokeStyle="rgba(0,0,0,.08)";c.lineWidth=1;
+  for(let x=0;x<W;x+=80){c.beginPath();c.moveTo(x,420);c.lineTo(x,H-INV_H);c.stroke()}
+  for(let y=420;y<H-INV_H;y+=60){c.beginPath();c.moveTo(0,y);c.lineTo(W,y);c.stroke()}
+  
+  // Baseboard
+  c.fillStyle="#bbb8b0";c.fillRect(0,415,W,8);
+  
+  // Ceiling lights (same as Room 1)
+  for(let i=0;i<4;i++){
+    let lx=180+i*290;
+    let flicker=.85+Math.sin(t*.003+i*1.7)*.15;
+    c.fillStyle="#ccc";c.fillRect(lx-70,8,140,10);
+    c.fillStyle="#ddd";c.fillRect(lx-65,10,130,6);
+    let lg=c.createRadialGradient(lx,25,5,lx,25,200);
+    lg.addColorStop(0,`rgba(255,255,240,${.15*flicker})`);
+    lg.addColorStop(1,"rgba(255,255,240,0)");
+    c.fillStyle=lg;c.fillRect(lx-200,0,400,200);
+    c.fillStyle=`rgba(255,255,240,${.9*flicker})`;c.fillRect(lx-55,18,110,8);
+  }
+  
+  // === Whiteboard with hint ===
+  let wb=room2.wb;
+  let wbH=inR(G.mx,G.my,wb);
+  c.fillStyle=wbH?"#f0f0f0":"#e5e5e8";
+  c.fillRect(wb.x,wb.y,wb.w,wb.h);
+  c.strokeStyle="#888";c.lineWidth=6;c.strokeRect(wb.x,wb.y,wb.w,wb.h);
+  c.fillStyle="#999";c.fillRect(wb.x+20,wb.y+wb.h,wb.w-40,8);
+  c.textAlign="left";
+  c.fillStyle="#2255bb";c.font='bold 18px "Noto Sans JP"';
+  c.fillText("ヒント:",wb.x+15,wb.y+35);
+  c.fillStyle="#aa22aa";c.font='16px "Noto Sans JP"';
+  c.fillText("見えないものを",wb.x+15,wb.y+65);
+  c.fillText("見る方法は？",wb.x+15,wb.y+90);
+  c.fillStyle="#cc3322";c.font='bold 24px "Share Tech Mono"';
+  c.fillText("→ UV",wb.x+15,wb.y+130);
+  c.fillStyle="#8855ff";c.font='20px sans-serif';
+  c.fillText("🔦",wb.x+120,wb.y+130);
+  if(wbH){c.strokeStyle="rgba(0,200,255,.5)";c.lineWidth=2;c.strokeRect(wb.x-2,wb.y-2,wb.w+4,wb.h+4)}
+  
+  // === UV Printer ===
+  let uvp=room2.uvprinter;
+  let uvpH=inR(G.mx,G.my,uvp);
+  // Table
+  c.fillStyle="#2e3045";c.fillRect(uvp.x-15,uvp.y+uvp.h-10,uvp.w+30,20);
+  c.fillStyle="#252738";
+  c.fillRect(uvp.x-5,uvp.y+uvp.h+10,12,70);
+  c.fillRect(uvp.x+uvp.w-7,uvp.y+uvp.h+10,12,70);
+  // Printer body
+  c.fillStyle=uvpH?"#252a3e":"#1e2332";
+  c.fillRect(uvp.x,uvp.y,uvp.w,uvp.h);
+  c.strokeStyle=uvpH?"#0af":"#2a2d45";c.lineWidth=2;c.strokeRect(uvp.x,uvp.y,uvp.w,uvp.h);
+  // Print bed (flatbed)
+  c.fillStyle="#333850";c.fillRect(uvp.x+20,uvp.y+uvp.h-50,uvp.w-40,10);
+  // UV lamp head
+  c.fillStyle="#8855ff";c.fillRect(uvp.x+60,uvp.y+30,100,20);
+  c.fillStyle="#aa77ff";c.fillRect(uvp.x+70,uvp.y+48,80,6);
+  // UV glow
+  let uvg=c.createRadialGradient(uvp.x+110,uvp.y+54,0,uvp.x+110,uvp.y+54,40);
+  uvg.addColorStop(0,"rgba(170,100,255,.2)");uvg.addColorStop(1,"rgba(170,100,255,0)");
+  c.fillStyle=uvg;c.fillRect(uvp.x,uvp.y,uvp.w,uvp.h);
+  // Label
+  c.fillStyle="#556";c.font='bold 12px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("UVプリンター",uvp.x+uvp.w/2,uvp.y+uvp.h-5);
+  // LED
+  c.fillStyle=G.inv.includes("plate_uv")?"#0f0":"#530";
+  c.beginPath();c.arc(uvp.x+25,uvp.y+25,4,0,Math.PI*2);c.fill();
+  if(uvpH){c.strokeStyle="rgba(0,200,255,.4)";c.lineWidth=2;c.strokeRect(uvp.x-2,uvp.y-2,uvp.w+4,uvp.h+4)}
+  
+  // === Laser Cutter ===
+  let las=room2.laser;
+  let lasH=inR(G.mx,G.my,las);
+  // Table
+  c.fillStyle="#2e3045";c.fillRect(las.x-15,las.y+las.h-10,las.w+30,20);
+  c.fillStyle="#252738";
+  c.fillRect(las.x-5,las.y+las.h+10,12,70);
+  c.fillRect(las.x+las.w-7,las.y+las.h+10,12,70);
+  // Laser body
+  c.fillStyle=lasH?"#2a1a1a":"#221515";
+  c.fillRect(las.x,las.y,las.w,las.h);
+  c.strokeStyle=lasH?"#f44":"#822";c.lineWidth=2;c.strokeRect(las.x,las.y,las.w,las.h);
+  // Bed
+  c.fillStyle="#333";c.fillRect(las.x+20,las.y+las.h-60,las.w-40,12);
+  // Grid on bed
+  c.strokeStyle="rgba(255,100,0,.2)";c.lineWidth=.5;
+  for(let gx=las.x+20;gx<las.x+las.w-20;gx+=20){
+    c.beginPath();c.moveTo(gx,las.y+las.h-60);c.lineTo(gx,las.y+las.h-48);c.stroke();
+  }
+  // Laser head
+  c.fillStyle="#cc0000";c.fillRect(las.x+100,las.y+40,40,30);
+  c.fillStyle="#ff3333";c.fillRect(las.x+115,las.y+68,10,8);
+  // Red glow
+  let rg=c.createRadialGradient(las.x+120,las.y+76,0,las.x+120,las.y+76,50);
+  rg.addColorStop(0,"rgba(255,50,0,.15)");rg.addColorStop(1,"rgba(255,50,0,0)");
+  c.fillStyle=rg;c.fillRect(las.x,las.y,las.w,las.h);
+  // Label
+  c.fillStyle="#556";c.font='bold 12px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("レーザー加工機",las.x+las.w/2,las.y+las.h-5);
+  // LED
+  c.fillStyle=G.inv.includes("plate_engraved")?"#0f0":"#530";
+  c.beginPath();c.arc(las.x+25,las.y+25,4,0,Math.PI*2);c.fill();
+  if(lasH){c.strokeStyle="rgba(255,100,0,.4)";c.lineWidth=2;c.strokeRect(las.x-2,las.y-2,las.w+4,las.h+4)}
+  
+  // === Acrylic Plate on desk (if not taken) ===
+  if(!room2.plate.taken){
+    let pl=room2.plate;
+    let plH=inR(G.mx,G.my,pl);
+    // Small desk
+    c.fillStyle="#2e3045";c.fillRect(pl.x-10,pl.y+pl.h,pl.w+20,15);
+    // Plate
+    c.fillStyle=plH?"#f5f5f5":"#ebebeb";
+    c.fillRect(pl.x,pl.y,pl.w,pl.h);
+    c.strokeStyle=plH?"#0cf":"#ccc";c.lineWidth=2;c.strokeRect(pl.x,pl.y,pl.w,pl.h);
+    // Shine
+    c.fillStyle="rgba(255,255,255,.4)";
+    c.fillRect(pl.x+5,pl.y+5,pl.w-10,8);
+    if(plH){c.strokeStyle="rgba(0,200,255,.5)";c.lineWidth=2;c.strokeRect(pl.x-2,pl.y-2,pl.w+4,pl.h+4)}
+  }
+  
+  // === UV Lamp on wall ===
+  let uvl=room2.uvlamp;
+  let uvlH=inR(G.mx,G.my,uvl);
+  // Wall mount
+  c.fillStyle="#444";c.fillRect(uvl.x+30,uvl.y,20,15);
+  // Lamp body
+  c.fillStyle=uvlH?"#3a3555":"#2a2545";
+  roundRect(c,uvl.x,uvl.y+15,uvl.w,uvl.h-15,6);c.fill();
+  c.strokeStyle=uvlH?"#aa77ff":"#553388";c.lineWidth=2;
+  roundRect(c,uvl.x,uvl.y+15,uvl.w,uvl.h-15,6);c.stroke();
+  // UV bulbs
+  c.fillStyle="#8855ff";
+  for(let i=0;i<3;i++){
+    c.fillRect(uvl.x+10+i*23,uvl.y+25,18,uvl.h-35);
+  }
+  // UV glow effect
+  let uvlg=c.createRadialGradient(uvl.x+uvl.w/2,uvl.y+60,0,uvl.x+uvl.w/2,uvl.y+60,80);
+  uvlg.addColorStop(0,"rgba(170,100,255,.15)");uvlg.addColorStop(1,"rgba(170,100,255,0)");
+  c.fillStyle=uvlg;
+  c.beginPath();c.arc(uvl.x+uvl.w/2,uvl.y+60,80,0,Math.PI*2);c.fill();
+  // Label
+  c.fillStyle="#667";c.font='bold 11px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("UVランプ",uvl.x+uvl.w/2,uvl.y+uvl.h+15);
+  if(uvlH){c.strokeStyle="rgba(170,100,255,.5)";c.lineWidth=2;
+    roundRect(c,uvl.x-2,uvl.y+13,uvl.w+4,uvl.h-11,8);c.stroke()}
+  
+  // === Door with keypad ===
+  let dr=room2.door;
+  let drH=inR(G.mx,G.my,dr);
+  // Door frame
+  c.fillStyle="#3a4055";c.fillRect(dr.x-12,dr.y-12,dr.w+24,dr.h+16);
+  // Door
+  let dg=c.createLinearGradient(dr.x,dr.y,dr.x+dr.w,dr.y);
+  dg.addColorStop(0,drH?"#4a5570":"#3e4560");dg.addColorStop(1,drH?"#3e4860":"#333a50");
+  c.fillStyle=dg;c.fillRect(dr.x,dr.y,dr.w,dr.h);
+  c.strokeStyle="rgba(255,255,255,.08)";c.lineWidth=2;
+  c.strokeRect(dr.x+20,dr.y+25,dr.w-40,dr.h/2-35);
+  c.strokeRect(dr.x+20,dr.y+dr.h/2+5,dr.w-40,dr.h/2-30);
+  // Keypad on door
+  let kpx=dr.x+40,kpy=dr.y+dr.h/2-40;
+  c.fillStyle="#1a1a2a";
+  roundRect(c,kpx,kpy,80,100,8);c.fill();
+  c.strokeStyle="#0af";c.lineWidth=1.5;
+  roundRect(c,kpx,kpy,80,100,8);c.stroke();
+  // Screen on keypad
+  c.fillStyle="#001100";c.fillRect(kpx+10,kpy+10,60,20);
+  c.fillStyle="#0f0";c.font='bold 14px "Share Tech Mono"';c.textAlign="center";
+  c.fillText(dr.locked?"****":"OPEN",kpx+40,kpy+26);
+  // Buttons hint (3x4 grid dots)
+  c.fillStyle="rgba(0,170,255,.3)";
+  for(let r=0;r<4;r++){
+    for(let col=0;col<3;col++){
+      c.beginPath();c.arc(kpx+20+col*20,kpy+45+r*12,2,0,Math.PI*2);c.fill();
+    }
+  }
+  // Lock status LED
+  c.fillStyle=dr.locked?"#f33":"#0f0";
+  c.beginPath();c.arc(dr.x+dr.w-30,dr.y+30,5,0,Math.PI*2);c.fill();
+  // Exit sign
+  c.save();c.shadowColor="rgba(0,255,0,.5)";c.shadowBlur=10;
+  c.fillStyle="#060";c.fillRect(dr.x+55,dr.y-55,110,38);
+  c.restore();
+  c.strokeStyle="#0f0";c.lineWidth=2;c.strokeRect(dr.x+55,dr.y-55,110,38);
+  c.fillStyle="#0f0";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("出口 →",dr.x+110,dr.y-28);
+  if(drH){c.strokeStyle="rgba(0,255,255,.5)";c.lineWidth=3;c.strokeRect(dr.x-2,dr.y-2,dr.w+4,dr.h+4)}
+  
+  // Title overlay
+  c.fillStyle="rgba(10,10,20,.85)";
+  c.fillRect(0,0,W,50);
+  c.fillStyle="#0cf";c.font='bold 24px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("🔬 つくまなラボ - Room 2",W/2,32);
+}
+
+// ==================== UV PRINTER SCREEN ====================
+
+function drawUVPrint(c){
+  let t=G.t;
+  c.fillStyle="#080c14";c.fillRect(0,0,W,H-INV_H);
+  
+  // Title bar
+  let tbg=c.createLinearGradient(0,0,0,60);
+  tbg.addColorStop(0,"#1a1030");tbg.addColorStop(1,"#0c0820");
+  c.fillStyle=tbg;c.fillRect(0,0,W,60);
+  c.strokeStyle="#3a3050";c.lineWidth=1;
+  c.beginPath();c.moveTo(0,60);c.lineTo(W,60);c.stroke();
+  
+  c.fillStyle="#aa77ff";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("🖨️ UVプリンター",W/2,40);
+  
+  // Close button
+  let bkH=G.mx>W-90&&G.mx<W-10&&G.my>12&&G.my<52;
+  c.fillStyle=bkH?"#6a1020":"#4a0a15";
+  roundRect(c,W-90,12,80,40,6);c.fill();
+  c.strokeStyle=bkH?"#f44":"#a22";c.lineWidth=2;
+  roundRect(c,W-90,12,80,40,6);c.stroke();
+  c.fillStyle="#fff";c.font='bold 14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("← 戻る",W-50,38);
+  
+  // Left panel
+  c.fillStyle="#0c0820";c.fillRect(0,60,200,H-60-INV_H);
+  c.strokeStyle="#3a3050";c.lineWidth=1;
+  c.beginPath();c.moveTo(200,60);c.lineTo(200,H-INV_H);c.stroke();
+  
+  c.fillStyle="#a8a";c.font='bold 13px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("▼ UV印刷設定",12,90);
+  c.fillStyle="#778";c.font='12px "Noto Sans JP"';
+  c.fillText("インク: UV不可視",12,115);
+  c.fillText("パターン: コード1337",12,135);
+  c.fillText("素材: アクリル板",12,155);
+  c.fillText("解像度: 600dpi",12,175);
+  
+  // Main view
+  let vx=220,vy=80,vw=800,vh=440;
+  c.fillStyle="#0a0a18";c.fillRect(vx,vy,vw,vh);
+  c.strokeStyle="#3a3a55";c.lineWidth=2;c.strokeRect(vx,vy,vw,vh);
+  
+  // Print bed outline
+  let bedX=vx+vw/2-150,bedY=vy+vh/2-100;
+  c.strokeStyle="rgba(150,150,200,.3)";c.lineWidth=1;c.setLineDash([5,5]);
+  c.strokeRect(bedX,bedY,300,200);c.setLineDash([]);
+  
+  // Acrylic plate on bed
+  c.fillStyle="#ddd";c.fillRect(bedX+120,bedY+75,60,50);
+  c.strokeStyle="#999";c.lineWidth=2;c.strokeRect(bedX+120,bedY+75,60,50);
+  
+  // UV printing effect (if printing)
+  if(uvp.printing){
+    let py=bedY+75+50*uvp.prog/100;
+    c.fillStyle="rgba(170,100,255,.3)";
+    c.fillRect(bedX+120,bedY+75,60,py-(bedY+75));
+    // Print head
+    c.fillStyle="#aa77ff";c.fillRect(bedX+100,py-5,100,10);
+    // UV glow
+    let uvg=c.createRadialGradient(bedX+150,py,0,bedX+150,py,50);
+    uvg.addColorStop(0,"rgba(170,100,255,.4)");uvg.addColorStop(1,"rgba(170,100,255,0)");
+    c.fillStyle=uvg;c.fillRect(bedX,bedY,300,200);
+  }
+  
+  // "Hidden code" hint (very faint)
+  c.fillStyle="rgba(100,80,120,.05)";
+  c.font='bold 18px "Share Tech Mono"';
+  c.textAlign="center";
+  c.fillText("1337",bedX+150,bedY+105);
+  
+  // Bottom button
+  if(!uvp.printing){
+    let sbH=G.mx>W/2-110&&G.mx<W/2+110&&G.my>H-140&&G.my<H-95;
+    let sg=c.createLinearGradient(W/2-110,H-140,W/2-110,H-95);
+    sg.addColorStop(0,sbH?"#4a3a6a":"#2a1a4a");
+    sg.addColorStop(1,sbH?"#3a2a5a":"#1a0a3a");
+    c.fillStyle=sg;roundRect(c,W/2-110,H-140,220,45,8);c.fill();
+    c.strokeStyle=sbH?"#aa77ff":"#663399";c.lineWidth=2;
+    roundRect(c,W/2-110,H-140,220,45,8);c.stroke();
+    c.fillStyle="#fff";c.font='bold 18px "Noto Sans JP"';c.textAlign="center";
+    c.fillText("🖨️ UV印刷開始",W/2,H-110);
+  }else{
+    // Progress bar
+    let pbx=W/2-180,pby=H-130,pbw=360,pbh=30;
+    c.fillStyle="#1a1a2a";roundRect(c,pbx,pby,pbw,pbh,6);c.fill();
+    c.fillStyle="#6a3a9a";roundRect(c,pbx,pby,pbw*uvp.prog/100,pbh,6);c.fill();
+    c.strokeStyle="#aa77ff";c.lineWidth=2;roundRect(c,pbx,pby,pbw,pbh,6);c.stroke();
+    c.fillStyle="#fff";c.font='bold 15px "Noto Sans JP"';c.textAlign="center";
+    c.fillText(`UV印刷中... ${Math.floor(uvp.prog)}%`,W/2,pby+21);
+  }
+}
+
+// ==================== UV REVEAL ANIMATION ====================
+
+function drawUVReveal(c){
+  let t=G.t;
+  // Auto-animate
+  if(!uvr.revealing&&!uvr.revealed){
+    uvr.revealing=true;uvr.prog=0;
+    let iv=setInterval(()=>{
+      uvr.prog+=2;
+      if(uvr.prog>=100){
+        clearInterval(iv);uvr.revealing=false;uvr.revealed=true;
+        G.inv=G.inv.filter(i=>i!=="plate_uv");G.inv.push("plate_revealed");
+        sOk();msg("コード 1337 が現れた！レーザーで刻印しよう！",3500);
+        setTimeout(()=>G.st=ST.ROOM2,1500);
+      }
+    },30);
+  }
+  
+  c.fillStyle="#050510";c.fillRect(0,0,W,H);
+  
+  // UV lamp effect
+  let lampX=W/2,lampY=150;
+  let uvg=c.createRadialGradient(lampX,lampY,20,lampX,lampY,300);
+  uvg.addColorStop(0,"rgba(170,100,255,.4)");uvg.addColorStop(.5,"rgba(100,50,200,.2)");
+  uvg.addColorStop(1,"rgba(50,20,100,0)");
+  c.fillStyle=uvg;c.fillRect(0,0,W,H);
+  
+  // UV lamp icon
+  c.fillStyle="#aa77ff";
+  c.fillRect(lampX-40,lampY-20,80,15);
+  c.fillRect(lampX-35,lampY-5,70,40);
+  c.fillStyle="#dd99ff";
+  for(let i=0;i<3;i++)c.fillRect(lampX-30+i*23,lampY,18,30);
+  
+  // UV rays
+  c.save();
+  c.translate(lampX,lampY+35);
+  for(let i=0;i<8;i++){
+    let a=(i/8)*Math.PI*2+t*.002;
+    c.strokeStyle=`rgba(170,100,255,${.3+Math.sin(t*.005+i)*.2})`;
+    c.lineWidth=2;
+    c.beginPath();c.moveTo(0,0);c.lineTo(Math.cos(a)*150,Math.sin(a)*150);c.stroke();
+  }
+  c.restore();
+  
+  // Acrylic plate being illuminated
+  let plateX=W/2-40,plateY=H/2+50;
+  c.fillStyle="#eeeeee";
+  c.fillRect(plateX,plateY,80,66);
+  c.strokeStyle="#aaa";c.lineWidth=2;c.strokeRect(plateX,plateY,80,66);
+  
+  // Code appearing under UV (fade in based on progress)
+  let alpha=Math.min(1,uvr.prog/100);
+  c.fillStyle=`rgba(0,255,200,${alpha})`;
+  c.font='bold 28px "Share Tech Mono"';c.textAlign="center";
+  c.fillText("1337",plateX+40,plateY+43);
+  
+  // Glow around code
+  if(alpha>.3){
+    c.save();c.shadowColor=`rgba(0,255,200,${alpha*.6})`;c.shadowBlur=20;
+    c.fillText("1337",plateX+40,plateY+43);
+    c.restore();
+  }
+  
+  // Text
+  c.fillStyle="#aa77ff";c.font='bold 24px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("UVランプで照らし中...",W/2,H-120);
+  
+  c.fillStyle="#8899ff";c.font='18px "Noto Sans JP"';
+  c.fillText(`隠されたコードが現れる... ${Math.floor(uvr.prog)}%`,W/2,H-85);
+}
+
+// ==================== LASER CUTTER SCREEN ====================
+
+function drawLaser(c){
+  let t=G.t;
+  c.fillStyle="#0c0808";c.fillRect(0,0,W,H-INV_H);
+  
+  // Title bar
+  let tbg=c.createLinearGradient(0,0,0,60);
+  tbg.addColorStop(0,"#2a1010");tbg.addColorStop(1,"#180808");
+  c.fillStyle=tbg;c.fillRect(0,0,W,60);
+  c.strokeStyle="#5a3030";c.lineWidth=1;
+  c.beginPath();c.moveTo(0,60);c.lineTo(W,60);c.stroke();
+  
+  c.fillStyle="#ff6666";c.font='bold 22px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("⚡ レーザー加工機",W/2,40);
+  
+  // Close button
+  let bkH=G.mx>W-90&&G.mx<W-10&&G.my>12&&G.my<52;
+  c.fillStyle=bkH?"#6a1020":"#4a0a15";
+  roundRect(c,W-90,12,80,40,6);c.fill();
+  c.strokeStyle=bkH?"#f44":"#a22";c.lineWidth=2;
+  roundRect(c,W-90,12,80,40,6);c.stroke();
+  c.fillStyle="#fff";c.font='bold 14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("← 戻る",W-50,38);
+  
+  // Left panel
+  c.fillStyle="#180808";c.fillRect(0,60,200,H-60-INV_H);
+  c.strokeStyle="#5a3030";c.lineWidth=1;
+  c.beginPath();c.moveTo(200,60);c.lineTo(200,H-INV_H);c.stroke();
+  
+  c.fillStyle="#f88";c.font='bold 13px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("▼ レーザー設定",12,90);
+  c.fillStyle="#988";c.font='12px "Noto Sans JP"';
+  c.fillText("出力: 40W",12,115);
+  c.fillText("パターン: 数字刻印",12,135);
+  c.fillText("深さ: 0.5mm",12,155);
+  c.fillText("速度: 500mm/s",12,175);
+  
+  // Main view
+  let vx=220,vy=80,vw=800,vh=440;
+  c.fillStyle="#0a0a0a";c.fillRect(vx,vy,vw,vh);
+  c.strokeStyle="#553333";c.lineWidth=2;c.strokeRect(vx,vy,vw,vh);
+  
+  // Work area grid
+  c.strokeStyle="rgba(255,100,0,.1)";c.lineWidth=.5;
+  for(let gx=vx;gx<=vx+vw;gx+=40){c.beginPath();c.moveTo(gx,vy);c.lineTo(gx,vy+vh);c.stroke()}
+  for(let gy=vy;gy<=vy+vh;gy+=40){c.beginPath();c.moveTo(vx,gy);c.lineTo(vx+vw,gy);c.stroke()}
+  
+  // Acrylic plate
+  let plateX=vx+vw/2-40,plateY=vy+vh/2-33;
+  c.fillStyle="#ddd";c.fillRect(plateX,plateY,80,66);
+  c.strokeStyle="#888";c.lineWidth=2;c.strokeRect(plateX,plateY,80,66);
+  
+  // Code already visible (revealed by UV)
+  c.fillStyle="rgba(0,200,180,.4)";
+  c.font='bold 28px "Share Tech Mono"';c.textAlign="center";
+  c.fillText("1337",plateX+40,plateY+43);
+  
+  // Laser engraving effect
+  if(las.engraving){
+    let engProg=las.prog/100;
+    // Laser head
+    let lx=plateX+40+Math.sin(t*.02)*30;
+    let ly=plateY+33;
+    c.fillStyle="#cc0000";c.fillRect(lx-20,ly-80,40,30);
+    c.fillStyle="#ff3333";c.fillRect(lx-5,ly-52,10,8);
+    // Laser beam
+    c.strokeStyle="rgba(255,0,0,.8)";c.lineWidth=3;
+    c.beginPath();c.moveTo(lx,ly-44);c.lineTo(lx,ly);c.stroke();
+    // Beam glow
+    let lg=c.createRadialGradient(lx,ly,0,lx,ly,40);
+    lg.addColorStop(0,"rgba(255,100,0,.6)");lg.addColorStop(1,"rgba(255,50,0,0)");
+    c.fillStyle=lg;c.beginPath();c.arc(lx,ly,40,0,Math.PI*2);c.fill();
+    // Engraved portions (darker)
+    c.save();c.globalCompositeOperation="multiply";
+    c.fillStyle=`rgba(50,50,50,${engProg})`;
+    c.font='bold 28px "Share Tech Mono"';c.textAlign="center";
+    c.fillText("1337",plateX+40,plateY+43);
+    c.restore();
+    // Sparks
+    for(let i=0;i<3;i++){
+      let sx=lx+(Math.random()-.5)*10;
+      let sy=ly+(Math.random()-.5)*10;
+      c.fillStyle="rgba(255,200,0,.8)";
+      c.beginPath();c.arc(sx,sy,Math.random()*2+1,0,Math.PI*2);c.fill();
+    }
+  }
+  
+  // Bottom button
+  if(!las.engraving){
+    let sbH=G.mx>W/2-110&&G.mx<W/2+110&&G.my>H-140&&G.my<H-95;
+    let sg=c.createLinearGradient(W/2-110,H-140,W/2-110,H-95);
+    sg.addColorStop(0,sbH?"#6a2020":"#4a1010");
+    sg.addColorStop(1,sbH?"#5a1818":"#3a0808");
+    c.fillStyle=sg;roundRect(c,W/2-110,H-140,220,45,8);c.fill();
+    c.strokeStyle=sbH?"#ff6666":"#cc3333";c.lineWidth=2;
+    roundRect(c,W/2-110,H-140,220,45,8);c.stroke();
+    c.fillStyle="#fff";c.font='bold 18px "Noto Sans JP"';c.textAlign="center";
+    c.fillText("⚡ 刻印開始",W/2,H-110);
+  }else{
+    // Progress bar
+    let pbx=W/2-180,pby=H-130,pbw=360,pbh=30;
+    c.fillStyle="#1a1a1a";roundRect(c,pbx,pby,pbw,pbh,6);c.fill();
+    c.fillStyle="#cc3333";roundRect(c,pbx,pby,pbw*las.prog/100,pbh,6);c.fill();
+    c.strokeStyle="#ff6666";c.lineWidth=2;roundRect(c,pbx,pby,pbw,pbh,6);c.stroke();
+    c.fillStyle="#fff";c.font='bold 15px "Noto Sans JP"';c.textAlign="center";
+    c.fillText(`レーザー刻印中... ${Math.floor(las.prog)}%`,W/2,pby+21);
+  }
+}
+
+// ==================== KEYPAD SCREEN ====================
+
+function drawKeypad(c){
+  let t=G.t;
+  c.fillStyle="#0a0a12";c.fillRect(0,0,W,H);
+  
+  // Title bar
+  c.fillStyle="#0e1a28";c.fillRect(0,0,W,60);
+  c.strokeStyle="#1a3050";c.lineWidth=1;
+  c.beginPath();c.moveTo(0,60);c.lineTo(W,60);c.stroke();
+  
+  c.fillStyle="#0cf";c.font='bold 24px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("🔢 キーパッド - 4桁コード入力",W/2,38);
+  
+  // Close button
+  let bkH=G.mx>W-90&&G.mx<W-10&&G.my>12&&G.my<52;
+  c.fillStyle=bkH?"#6a1020":"#4a0a15";
+  roundRect(c,W-90,12,80,40,6);c.fill();
+  c.strokeStyle=bkH?"#f44":"#a22";c.lineWidth=2;
+  roundRect(c,W-90,12,80,40,6);c.stroke();
+  c.fillStyle="#fff";c.font='bold 14px "Noto Sans JP"';c.textAlign="center";
+  c.fillText("← 戻る",W-50,38);
+  
+  // Display screen
+  c.fillStyle="#001a00";
+  roundRect(c,W/2-200,100,400,60,8);c.fill();
+  c.strokeStyle="#0f0";c.lineWidth=2;
+  roundRect(c,W/2-200,100,400,60,8);c.stroke();
+  c.fillStyle="#0f0";c.font='bold 42px "Share Tech Mono"';c.textAlign="center";
+  let display=kpd.code.padEnd(4,"_");
+  c.fillText(display,W/2,145);
+  
+  // Hint text
+  c.fillStyle="#578";c.font='16px "Noto Sans JP"';
+  c.fillText("UVランプで明かされたコードを入力してください",W/2,550);
+  
+  // Number pad (3x4 grid)
+  let bx=W/2-150,by=200,bw=90,bh=80,gap=10;
+  let buttons=[
+    ["1","2","3"],
+    ["4","5","6"],
+    ["7","8","9"],
+    ["C","0","OK"]
+  ];
+  
+  for(let r=0;r<4;r++){
+    for(let col=0;col<3;col++){
+      let px=bx+col*(bw+gap),py=by+r*(bh+gap);
+      let btnH=G.mx>px&&G.mx<px+bw&&G.my>py&&G.my<py+bh;
+      let label=buttons[r][col];
+      
+      // Button background
+      let bg=c.createLinearGradient(px,py,px,py+bh);
+      if(label==="OK"){
+        bg.addColorStop(0,btnH?"#1a6030":"#124820");
+        bg.addColorStop(1,btnH?"#0e4a20":"#0a3518");
+      }else if(label==="C"){
+        bg.addColorStop(0,btnH?"#6a2020":"#4a1010");
+        bg.addColorStop(1,btnH?"#5a1818":"#3a0808");
+      }else{
+        bg.addColorStop(0,btnH?"#2a4a6a":"#1a3050");
+        bg.addColorStop(1,btnH?"#1a3a5a":"#0e2040");
+      }
+      c.fillStyle=bg;
+      roundRect(c,px,py,bw,bh,8);c.fill();
+      
+      // Border
+      c.strokeStyle=label==="OK"?(btnH?"#0f0":"#0a0"):
+                     label==="C"?(btnH?"#f44":"#a22"):
+                     (btnH?"#0cf":"#068");
+      c.lineWidth=2;
+      roundRect(c,px,py,bw,bh,8);c.stroke();
+      
+      // Label
+      c.fillStyle="#fff";
+      c.font=label==="OK"||label==="C"?'bold 20px "Noto Sans JP"':'bold 32px "Share Tech Mono"';
+      c.textAlign="center";
+      c.fillText(label,px+bw/2,py+bh/2+12);
+    }
+  }
+}
+
+// ==================== INTRO SCREEN ====================
+
+function drawIntro(c){
+  let t=performance.now();
+  let elapsed=t-G.introT;
+
+  // Dark background with subtle radial glow
+  let bg=c.createRadialGradient(W/2,H/2,0,W/2,H/2,600);
+  bg.addColorStop(0,"#0c1828");bg.addColorStop(.6,"#060e1a");bg.addColorStop(1,"#020508");
+  c.fillStyle=bg;c.fillRect(0,0,W,H);
+
+  // Floating particles
+  for(let i=0;i<40;i++){
+    let seed=i*6271;
+    let ang=(t*.0003+seed)%(Math.PI*2);
+    let rad=100+((seed*11)%350)+Math.sin(t*.0008+i)*20;
+    let px=W/2+Math.cos(ang)*rad;
+    let py=H/2+Math.sin(ang)*rad;
+    let pa=.2+Math.sin(t*.004+i*.9)*.2;
+    let ps=1+Math.sin(t*.003+i*1.1)*.8;
+    c.fillStyle=`rgba(0,200,255,${pa})`;
+    c.beginPath();c.arc(px,py,ps,0,Math.PI*2);c.fill();
+  }
+
+  // Title fade-in (0~800ms)
+  let titleA=Math.min(1,elapsed/800);
+  if(titleA>0){
+    c.save();c.globalAlpha=titleA;c.textAlign="center";
+
+    // Glow effect behind title
+    c.save();
+    c.shadowColor="rgba(0,180,255,.7)";c.shadowBlur=40;
+    c.fillStyle="#0cf";c.font='bold 64px "Noto Sans JP"';
+    c.fillText("つくまなラボ",W/2,H/2-100);
+    c.restore();
+
+    // Subtitle
+    c.fillStyle="rgba(100,200,255,.6)";c.font='18px "Noto Sans JP"';
+    c.fillText("Escape from TukumanaLab",W/2,H/2-60);
+
+    c.restore();
+  }
+
+  // Message lines fade-in (staggered, starting at 800ms)
+  let lines=["ここは...つくまなラボ？","ドアに鍵がかかっている！","ラボの機材を使って脱出しよう！"];
+  c.textAlign="center";
+  for(let i=0;i<lines.length;i++){
+    let lineStart=800+i*400;
+    let la=Math.max(0,Math.min(1,(elapsed-lineStart)/500));
+    let ly=H/2-5+i*38;
+    // slide up slightly as fading in
+    let slideY=ly+10*(1-la);
+    if(la>0){
+      c.save();c.globalAlpha=la;
+      c.fillStyle="#fff";c.font='24px "Noto Sans JP"';
+      c.fillText(lines[i],W/2,slideY);
+      c.restore();
+    }
+  }
+
+  // Start button (appears after all text, ~2000ms)
+  let btnA=Math.max(0,Math.min(1,(elapsed-1800)/500));
+  if(btnA>0){
+    c.save();c.globalAlpha=btnA;c.textAlign="center";
+    let bx=W/2-100,by=H/2+120,bw=200,bh=50;
+    let bHov=inR(G.mx,G.my,{x:bx,y:by,w:bw,h:bh});
+
+    // Button glow pulse
+    let pulse=.15+Math.sin(t*.004)*.05;
+    c.fillStyle=bHov?`rgba(0,200,255,.3)`:`rgba(0,150,255,${pulse})`;
+    roundRect(c,bx,by,bw,bh,10);c.fill();
+    c.strokeStyle=bHov?"#0ef":"rgba(0,200,255,.5)";c.lineWidth=2;
+    roundRect(c,bx,by,bw,bh,10);c.stroke();
+
+    c.fillStyle=bHov?"#fff":"#0cf";c.font='bold 22px "Noto Sans JP"';
+    c.fillText("スタート",W/2,by+33);
+    c.restore();
+  }
+}
+
+// ==================== WIN SCREEN ====================
+
+function drawWin(c){
+  let t=G.t;
+
+  // Animated background gradient
+  let bg=c.createRadialGradient(W/2,H/2,0,W/2,H/2,600);
+  bg.addColorStop(0,"#0a3050");bg.addColorStop(.5,"#061a30");bg.addColorStop(1,"#020810");
+  c.fillStyle=bg;c.fillRect(0,0,W,H);
+
+  // Particle stars
+  for(let i=0;i<60;i++){
+    let seed=i*7919;
+    let ang=(t*.0004+seed)%(Math.PI*2);
+    let rad=80+((seed*13)%400)+Math.sin(t*.001+i)*.30*((seed*7)%50);
+    let sx=W/2+Math.cos(ang)*rad;
+    let sy=H/2+Math.sin(ang)*rad;
+    let sz=1.5+Math.sin(t*.003+i*1.3)*1.2;
+    let sa=.4+Math.sin(t*.005+i*.7)*.4;
+    c.fillStyle=i%3===0?`rgba(255,255,100,${sa})`:`rgba(100,220,255,${sa})`;
+    c.beginPath();c.arc(sx,sy,sz,0,Math.PI*2);c.fill();
+  }
+
+  // Door opening animation
+  let openT=Math.min(1,(t-G.doorAnim)/2000);
+  if(G.doorAnim===0)G.doorAnim=t;
+  let doorW=220*Math.max(0,1-openT);
+  if(openT<1){
+    // Draw the door sliding open
+    c.fillStyle="#3a4560";
+    c.fillRect(W/2-doorW/2,H/2-120,doorW,240);
+    c.strokeStyle="#5a6a7a";c.lineWidth=4;
+    c.strokeRect(W/2-doorW/2,H/2-120,doorW,240);
+    // Light from beyond
+    let lg=c.createRadialGradient(W/2,H/2,0,W/2,H/2,300);
+    lg.addColorStop(0,`rgba(255,255,200,${openT*.5})`);lg.addColorStop(1,"rgba(255,255,200,0)");
+    c.fillStyle=lg;c.fillRect(0,0,W,H);
+  }
+
+  // Main text (fade in after door opens)
+  let textA=Math.max(0,Math.min(1,(openT-.4)/.6));
+  if(textA>0){
+    c.save();c.globalAlpha=textA;c.textAlign="center";
+
+    let bw=W-200,bh=310;
+    let bTop=H/2-175;
+
+    // Border decoration (draw first, behind text)
+    c.strokeStyle="rgba(0,255,255,.3)";c.lineWidth=2;
+    roundRect(c,W/2-bw/2,bTop,bw,bh,12);c.stroke();
+
+    // Glow behind title
+    c.save();c.shadowColor="rgba(0,255,255,.6)";c.shadowBlur=30;
+    c.fillStyle="#0ff";c.font='bold 54px "Noto Sans JP"';
+    c.fillText("脱出成功！",W/2,H/2-55);
+    c.restore();
+
+    
+
+    // Bottom message
+    c.fillStyle="#0aa";c.font='20px "Noto Sans JP"';
+    c.fillText("🎉 お疲れ様でした！ 🎉",W/2,H/2+20);
+
+    // Restart button
+    let rbx=W/2-80,rby=H/2+60,rbw=160,rbh=42;
+    let rbH=inR(G.mx,G.my,{x:rbx,y:rby,w:rbw,h:rbh});
+    c.fillStyle=rbH?"rgba(0,200,255,.25)":"rgba(0,100,150,.15)";
+    roundRect(c,rbx,rby,rbw,rbh,8);c.fill();
+    c.strokeStyle=rbH?"#0cf":"rgba(0,255,255,.4)";c.lineWidth=2;
+    roundRect(c,rbx,rby,rbw,rbh,8);c.stroke();
+    c.fillStyle=rbH?"#fff":"#0cf";c.font='bold 18px "Noto Sans JP"';
+    c.fillText("リスタート",W/2,rby+28);
+
+    c.restore();
+  }
+}
+
+// ==================== INVENTORY BAR ====================
+
+function drawInv(c){
+  // Background bar
+  let ig=c.createLinearGradient(0,H-INV_H,0,H);
+  ig.addColorStop(0,"#101420");ig.addColorStop(1,"#0a0e18");
+  c.fillStyle=ig;c.fillRect(0,H-INV_H,W,INV_H);
+  c.strokeStyle="#1a3050";c.lineWidth=2;
+  c.beginPath();c.moveTo(0,H-INV_H);c.lineTo(W,H-INV_H);c.stroke();
+
+  // Label
+  c.fillStyle="#068";c.font='bold 14px "Noto Sans JP"';c.textAlign="left";
+  c.fillText("🎒 持ち物",15,H-INV_H+22);
+
+  // Empty slots
+  let sx=160,sy=H-INV_H+10,sw=60,sh=60;
+  for(let i=0;i<6;i++){
+    let ix=sx+i*75;
+    c.fillStyle="#0a1018";
+    roundRect(c,ix,sy,sw,sh,6);c.fill();
+    c.strokeStyle="#1a2a3a";c.lineWidth=1;
+    roundRect(c,ix,sy,sw,sh,6);c.stroke();
+  }
+
+  // Items
+  for(let i=0;i<G.inv.length;i++){
+    let item=G.inv[i];
+    let ix=sx+i*75;
+    let isSel=G.sel===item;
+    let isHov=G.mx>ix&&G.mx<ix+sw&&G.my>sy&&G.my<sy+sh;
+
+    // Slot highlight
+    c.fillStyle=isSel?"rgba(0,180,255,.2)":(isHov?"rgba(0,120,180,.1)":"rgba(10,20,30,.5)");
+    roundRect(c,ix,sy,sw,sh,6);c.fill();
+    c.strokeStyle=isSel?"#0cf":(isHov?"#08a":"#1a3050");
+    c.lineWidth=isSel?2.5:1;
+    roundRect(c,ix,sy,sw,sh,6);c.stroke();
+
+    // Draw items
+    if(item==="key"){
+      drawKeySmall(c,ix+sw/2,sy+sh/2-3,22,prn.filIdx!=null?filColors[prn.filIdx]:null);
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='10px "Noto Sans JP"';c.textAlign="center";
+      c.fillText("3D鍵",ix+sw/2,sy+sh-4);
+    }else if(item==="plate"){
+      c.fillStyle="#ddd";c.fillRect(ix+10,sy+15,40,30);
+      c.strokeStyle="#888";c.lineWidth=1.5;c.strokeRect(ix+10,sy+15,40,30);
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='9px "Noto Sans JP"';c.textAlign="center";
+      c.fillText("アクリル板",ix+sw/2,sy+sh-4);
+    }else if(item==="plate_uv"){
+      c.fillStyle="#ddd";c.fillRect(ix+10,sy+15,40,30);
+      c.strokeStyle="#888";c.lineWidth=1.5;c.strokeRect(ix+10,sy+15,40,30);
+      c.fillStyle="rgba(170,100,255,.2)";c.fillRect(ix+10,sy+15,40,30);
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='9px "Noto Sans JP"';c.textAlign="center";
+      c.fillText("UV印刷済",ix+sw/2,sy+sh-4);
+    }else if(item==="plate_revealed"){
+      c.fillStyle="#ddd";c.fillRect(ix+10,sy+15,40,30);
+      c.strokeStyle="#888";c.lineWidth=1.5;c.strokeRect(ix+10,sy+15,40,30);
+      c.fillStyle="rgba(0,255,200,.6)";c.font='bold 14px "Share Tech Mono"';c.textAlign="center";
+      c.fillText("1337",ix+30,sy+35);
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='9px "Noto Sans JP"';
+      c.fillText("コード発現",ix+sw/2,sy+sh-4);
+    }else if(item==="plate_engraved"){
+      c.fillStyle="#ddd";c.fillRect(ix+10,sy+15,40,30);
+      c.strokeStyle="#888";c.lineWidth=1.5;c.strokeRect(ix+10,sy+15,40,30);
+      c.fillStyle="#333";c.font='bold 14px "Share Tech Mono"';c.textAlign="center";
+      c.fillText("1337",ix+30,sy+35);
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='9px "Noto Sans JP"';
+      c.fillText("刻印済",ix+sw/2,sy+sh-4);
+    }else if(item==="power_cable"){
+      // Cable body
+      c.strokeStyle="#333";c.lineWidth=4;
+      c.beginPath();c.moveTo(ix+15,sy+20);c.bezierCurveTo(ix+25,sy+38,ix+35,sy+18,ix+45,sy+32);c.stroke();
+      // Plug head
+      c.fillStyle="#444";c.fillRect(ix+8,sy+14,14,16);
+      c.fillStyle="#bbb";c.fillRect(ix+10,sy+11,4,5);c.fillRect(ix+17,sy+11,4,5);
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='9px "Noto Sans JP"';c.textAlign="center";
+      c.fillText("電源ケーブル",ix+sw/2,sy+sh-4);
+    }else if(item.startsWith("fil_")){
+      let fi=parseInt(item[4]);
+      let fc=filColors[fi];
+      c.strokeStyle=fc;c.lineWidth=3;
+      c.beginPath();c.arc(ix+sw/2,sy+sh/2-5,18,0,Math.PI*2);c.stroke();
+      c.strokeStyle=filDark[fi];c.lineWidth=2;
+      c.beginPath();c.arc(ix+sw/2,sy+sh/2-5,7,0,Math.PI*2);c.stroke();
+      c.fillStyle=isSel?"#0cf":"#89a";c.font='9px "Noto Sans JP"';c.textAlign="center";
+      c.fillText(filNames[fi],ix+sw/2,sy+sh-4);
+    }
+
+    // Selection glow
+    if(isSel){
+      c.save();c.shadowColor="rgba(0,255,255,.5)";c.shadowBlur=12;
+      c.strokeStyle="rgba(0,255,255,.4)";c.lineWidth=2;
+      roundRect(c,ix-2,sy-2,sw+4,sh+4,8);c.stroke();
+      c.restore();
+    }
+  }
+
+  // Hint text
+  if(G.inv.length===0){
+    c.fillStyle="#334";c.font='13px "Noto Sans JP"';c.textAlign="center";
+    c.fillText("アイテムがまだありません。部屋を調べてみよう...",W/2,H-INV_H+45);
+  }else if(G.sel){
+    c.fillStyle="#0af";c.font='bold 13px "Noto Sans JP"';c.textAlign="right";
+    c.fillText("「3Dプリント鍵」を選択中 — ドアをクリック！",W-20,H-INV_H+22);
+  }
+
+  // State indicator
+  c.fillStyle="#334";c.font='11px "Share Tech Mono"';c.textAlign="right";
+  let stLabel={roomL:"CAD室",room:"ROOM",roomR:"3DP室",passcode:"PASSCODE",model:"CAD",slice:"SLICER",print:"PRINTING",filament:"FILAMENT",win:"ESCAPED"};
+  c.fillText(`[${stLabel[G.st]||G.st}]`,W-15,H-8);
+}
+
+// ==================== KEY ICON ====================
+
+function drawKeySmall(c,x,y,size,col){
+  c.save();c.translate(x,y);
+  let s=size/30;
+  let km=col||"#ffd700";
+  let ks=col?filDark[filColors.indexOf(col)]||"#888":"#b8960f";
+
+  // Bow (head) circle
+  c.fillStyle=km;
+  c.beginPath();c.arc(-8*s,0,9*s,0,Math.PI*2);c.fill();
+  c.strokeStyle=ks;c.lineWidth=1.5*s;c.stroke();
+  // Hole
+  c.fillStyle="#0a1018";
+  c.beginPath();c.arc(-8*s,0,4*s,0,Math.PI*2);c.fill();
+
+  // Shaft
+  c.fillStyle=km;
+  c.fillRect(-2*s,-3*s,28*s,6*s);
+  c.strokeStyle=ks;c.lineWidth=1*s;
+  c.strokeRect(-2*s,-3*s,28*s,6*s);
+
+  // Teeth
+  c.fillStyle=km;
+  c.fillRect(12*s,3*s,4*s,6*s);
+  c.fillRect(19*s,3*s,4*s,8*s);
+  c.fillRect(25*s,3*s,3*s,5*s);
+  c.strokeStyle=ks;c.lineWidth=.8*s;
+  c.strokeRect(12*s,3*s,4*s,6*s);
+  c.strokeRect(19*s,3*s,4*s,8*s);
+  c.strokeRect(25*s,3*s,3*s,5*s);
+
+  // Shine
+  c.fillStyle="rgba(255,255,255,.3)";
+  c.fillRect(-2*s,-3*s,28*s,2*s);
+
+  c.restore();
+}
+
+// ==================== GAME LOOP ====================
+
+let lastT=0;
+function loop(ts){
+  G.t=ts;
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ==================== RESPONSIVE SCALING ====================
+
+function fitCanvas(){
+  let gc=document.getElementById("gc");
+  let border=6; // 3px * 2
+  let vw=window.innerWidth,vh=window.innerHeight;
+  let cw=W+border,ch=H+border;
+  let scale=Math.min(vw/cw,vh/ch,1); // never upscale beyond 1
+  if(scale<1){
+    gc.style.transform=`scale(${scale})`;
+    gc.style.width=W+'px';gc.style.height=H+'px';
+    gc.style.margin=`${-(ch*(1-scale))/2}px ${-(cw*(1-scale))/2}px`;
+  }else{
+    gc.style.transform='';gc.style.width='';gc.style.height='';gc.style.margin='';
+  }
+  checkSize();
+}
+
+// ==================== TOUCH EVENTS ====================
+
+let _touchId=null;
+function onTouchStart(e){
+  e.preventDefault();
+  let t=e.changedTouches[0];_touchId=t.identifier;
+  let p=toCanvas(t.clientX,t.clientY);
+  G.mx=p.x;G.my=p.y;
+  // Simulate mousedown
+  onDown({clientX:t.clientX,clientY:t.clientY});
+}
+function onTouchMove(e){
+  e.preventDefault();
+  for(let t of e.changedTouches){
+    if(t.identifier===_touchId){
+      let p=toCanvas(t.clientX,t.clientY);
+      G.mx=p.x;G.my=p.y;
+    }
+  }
+}
+function onTouchEnd(e){
+  e.preventDefault();
+  for(let t of e.changedTouches){
+    if(t.identifier===_touchId){
+      let p=toCanvas(t.clientX,t.clientY);
+      G.mx=p.x;G.my=p.y;
+      _touchId=null;
+      onUp();
+      // Simulate click
+      onClick({clientX:t.clientX,clientY:t.clientY});
+    }
+  }
+}
+
+// ==================== SIZE WARNING ====================
+function checkSize(){
+  let cv=document.getElementById("cv");
+  let warn=document.getElementById("size-warn");
+  let r=cv.getBoundingClientRect();
+  let shortW=r.left<-1||r.right>window.innerWidth+1;
+  let shortH=r.top<-1||r.bottom>window.innerHeight+1;
+  let hidden=shortW||shortH;
+  // On mobile portrait, suggest landscape
+  let isMobile='ontouchstart' in window;
+  let isPortrait=window.innerHeight>window.innerWidth;
+  let showRotate=isMobile&&isPortrait;
+  warn.classList.toggle("show",hidden||showRotate);
+  if(showRotate){
+    warn.innerHTML='📱 <span>横向き</span>にすると遊びやすくなります。';
+  }else if(hidden){
+    let dir=shortW&&shortH?"横幅と高さ":shortW?"横幅":"高さ";
+    warn.innerHTML='⚠ 画面の<span>'+dir+'</span>が足りないため、ゲームの一部が表示されていません。<span>ブラウザを拡大</span>するか、<span>全画面表示</span>でお楽しみください。';
+  }
+}
+window.addEventListener("load",init);
+    </script>
+</body>
+</html>
