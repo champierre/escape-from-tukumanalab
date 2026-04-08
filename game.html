@@ -2073,6 +2073,88 @@ function drawPrint(c){
   }
 }
 
+function drawIntro(c){
+  let t=performance.now();
+  let elapsed=t-G.introT;
+
+  // Dark background with subtle radial glow
+  let bg=c.createRadialGradient(W/2,H/2,0,W/2,H/2,600);
+  bg.addColorStop(0,"#0c1828");bg.addColorStop(.6,"#060e1a");bg.addColorStop(1,"#020508");
+  c.fillStyle=bg;c.fillRect(0,0,W,H);
+
+  // Floating particles
+  for(let i=0;i<40;i++){
+    let seed=i*6271;
+    let ang=(t*.0003+seed)%(Math.PI*2);
+    let rad=100+((seed*11)%350)+Math.sin(t*.0008+i)*20;
+    let px=W/2+Math.cos(ang)*rad;
+    let py=H/2+Math.sin(ang)*rad;
+    let pa=.2+Math.sin(t*.004+i*.9)*.2;
+    let ps=1+Math.sin(t*.003+i*1.1)*.8;
+    c.fillStyle=`rgba(0,200,255,${pa})`;
+    c.beginPath();c.arc(px,py,ps,0,Math.PI*2);c.fill();
+  }
+
+  // Title fade-in (0~800ms)
+  let titleA=Math.min(1,elapsed/800);
+  if(titleA>0){
+    c.save();c.globalAlpha=titleA;c.textAlign="center";
+
+    // Colorful title matching TukumanaLab logo
+    c.save();
+    c.font='bold 64px "Noto Sans JP"';c.textAlign="center";
+    var ttl=[{t:"つ",c:"#F9EE52",g:"rgba(249,238,82,.6)"},{t:"く",c:"#589FE2",g:"rgba(88,159,226,.6)"},{t:"ま",c:"#4C964A",g:"rgba(76,150,74,.6)"},{t:"な",c:"#C9347C",g:"rgba(201,52,124,.6)"},{t:"ラボから脱出せよ！",c:"#fff",g:"rgba(255,255,255,.4)"}];
+    var fullTxt="つくまなラボから脱出せよ！";
+    var tw=c.measureText(fullTxt).width;
+    var tx=W/2-tw/2,ty=H/2-100;
+    c.textAlign="left";
+    for(var ti=0;ti<ttl.length;ti++){c.shadowColor=ttl[ti].g;c.shadowBlur=30;c.fillStyle=ttl[ti].c;c.fillText(ttl[ti].t,tx,ty);tx+=c.measureText(ttl[ti].t).width;}
+    c.restore();
+
+    // Subtitle
+    c.fillStyle="rgba(100,200,255,.6)";c.font='18px "Noto Sans JP"';
+    c.fillText("Escape from TukumanaLab",W/2,H/2-60);
+
+    c.restore();
+  }
+
+  // Message lines fade-in (staggered, starting at 800ms)
+  let lines=["ここは...つくまなラボ？","ドアに鍵がかかっている！","ラボの機材を使って脱出しよう！"];
+  c.textAlign="center";
+  for(let i=0;i<lines.length;i++){
+    let lineStart=800+i*400;
+    let la=Math.max(0,Math.min(1,(elapsed-lineStart)/500));
+    let ly=H/2-5+i*38;
+    // slide up slightly as fading in
+    let slideY=ly+10*(1-la);
+    if(la>0){
+      c.save();c.globalAlpha=la;
+      c.fillStyle="#fff";c.font='24px "Noto Sans JP"';
+      c.fillText(lines[i],W/2,slideY);
+      c.restore();
+    }
+  }
+
+  // Start button (appears after all text, ~2000ms)
+  let btnA=Math.max(0,Math.min(1,(elapsed-1800)/500));
+  if(btnA>0){
+    c.save();c.globalAlpha=btnA;c.textAlign="center";
+    let bx=W/2-100,by=H/2+120,bw=200,bh=50;
+    let bHov=inR(G.mx,G.my,{x:bx,y:by,w:bw,h:bh});
+
+    // Button glow pulse
+    let pulse=.15+Math.sin(t*.004)*.05;
+    c.fillStyle=bHov?`rgba(0,200,255,.3)`:`rgba(0,150,255,${pulse})`;
+    roundRect(c,bx,by,bw,bh,10);c.fill();
+    c.strokeStyle=bHov?"#0ef":"rgba(0,200,255,.5)";c.lineWidth=2;
+    roundRect(c,bx,by,bw,bh,10);c.stroke();
+
+    c.fillStyle=bHov?"#fff":"#0cf";c.font='bold 22px "Noto Sans JP"';
+    c.fillText("スタート",W/2,by+33);
+    c.restore();
+  }
+}
+
 // ==================== WIN SCREEN ====================
 
 function drawWin(c){
