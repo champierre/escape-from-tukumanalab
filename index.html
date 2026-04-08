@@ -73,7 +73,7 @@ const chessImg={};
   const map={K:'wK',Q:'wQ',R:'wR',B:'wB',N:'wN',P:'wP',k:'bK',q:'bQ',r:'bR',b:'bB',n:'bN',p:'bP'};
   for(let k in map){let img=new Image();img.src='pieces/'+map[k]+'.svg';chessImg[k]=img;}
 })();
-const pcd={code:"",target:"2183525"};
+const pcd={code:"",target:"2183525",fails:0,hinted:false,hintLevel:0};
 
 let aC=null;
 function iAudio(){try{aC=new(window.AudioContext||window.webkitAudioContext)}catch(e){}}
@@ -704,7 +704,7 @@ function clickRoomL(x,y){
   let cp={x:W/2-100,y:250,w:200,h:140};
   if(inR(x,y,cp)){
     if(!G.pcUnlocked){
-      G.st=ST.PASSCODE;pcd.code="";sClick();msg("PCにパスコードロックがかかっている...");
+      G.st=ST.PASSCODE;pcd.code="";pcd.fails=0;pcd.hinted=false;pcd.hintLevel=0;sClick();msg("PCにパスコードロックがかかっている...");
       return;
     }
     if(slc.done){G.st=ST.SLICE;sClick();msg("スライサーを再開...");}
@@ -1405,9 +1405,9 @@ function drawPasscode(c){
   
   // Code display
   let dw=320,dh=50,dx=W/2-dw/2,dy=my+155;
-  c.fillStyle="#001a00";roundRect(c,dx,dy,dw,dh,6);c.fill();
-  c.strokeStyle="#0f0";c.lineWidth=2;roundRect(c,dx,dy,dw,dh,6);c.stroke();
-  c.fillStyle="#0f0";c.font='bold 36px "Share Tech Mono"';c.textAlign="center";
+  c.fillStyle="#001228";roundRect(c,dx,dy,dw,dh,6);c.fill();
+  c.strokeStyle="#0bf";c.lineWidth=2;roundRect(c,dx,dy,dw,dh,6);c.stroke();
+  c.fillStyle="#0cf";c.font='bold 36px "Share Tech Mono"';c.textAlign="center";
   let display=pcd.code.padEnd(7,"_").split("").join(" ");
   c.fillText(display,W/2,dy+38);
   
@@ -1427,18 +1427,10 @@ function drawPasscode(c){
       let btnH=G.mx>px&&G.mx<px+bw&&G.my>py&&G.my<py+bh;
       let label=buttons[r][col];
       let bg=c.createLinearGradient(px,py,px,py+bh);
-      if(label==="OK"){
-        bg.addColorStop(0,btnH?"#1a6030":"#124820");
-        bg.addColorStop(1,btnH?"#0e4a20":"#0a3518");
-      }else if(label==="C"){
-        bg.addColorStop(0,btnH?"#6a2020":"#4a1010");
-        bg.addColorStop(1,btnH?"#5a1818":"#3a0808");
-      }else{
-        bg.addColorStop(0,btnH?"#2a4a6a":"#1a3050");
-        bg.addColorStop(1,btnH?"#1a3a5a":"#0e2040");
-      }
+      bg.addColorStop(0,btnH?"#355a82":"#253a58");
+      bg.addColorStop(1,btnH?"#223d5e":"#14243c");
       c.fillStyle=bg;roundRect(c,px,py,bw,bh,6);c.fill();
-      c.strokeStyle=label==="OK"?(btnH?"#0f0":"#0a0"):label==="C"?(btnH?"#f44":"#a22"):(btnH?"#0cf":"#068");
+      c.strokeStyle=btnH?"#0df":"#079";
       c.lineWidth=2;roundRect(c,px,py,bw,bh,6);c.stroke();
       c.fillStyle="#fff";
       c.font=label==="OK"||label==="C"?'bold 18px "Noto Sans JP"':'bold 26px "Share Tech Mono"';
@@ -1477,19 +1469,30 @@ function clickPasscode(x,y){
   }
   // Back button
   let bbx=W/2-60,bby=my+mh+40;
-  if(inR(x,y,{x:bbx,y:bby,w:120,h:36})){G.st=ST.ROOM_L;pcd.code="";sClick();return}
+  if(inR(x,y,{x:bbx,y:bby,w:120,h:36})){G.st=ST.ROOM_L;pcd.code="";pcd.fails=0;pcd.hinted=false;pcd.hintLevel=0;sClick();return}
 }
 
 function checkPasscode(){
   if(pcd.code===pcd.target){
-    G.pcUnlocked=true;sUnlock();
+    G.pcUnlocked=true;pcd.fails=0;pcd.hinted=false;pcd.hintLevel=0;sUnlock();
     msg("パスコードが正しい！PCのロックが解除されました！",3000);
     setTimeout(()=>{
       G.st=ST.MODEL;mdl.parts=[];mdl.selIdx=-1;mdl.rot=0;
       msg("TukuCADを起動...");
     },1200);
   }else{
-    sErr();msg("パスコードが違います...");pcd.code="";
+    pcd.fails++;sErr();
+    let hints=[
+      "ヒント: PC横の破れたひらがな表と小さな数字をよく見よう。",
+      "さらにヒント: 付箋の『いつもの』を、ひらがな表の番号に置き換えてみよう（例: い=2）。"
+    ];
+    if(pcd.fails>=3&&pcd.hintLevel<hints.length){
+      msg(`パスコードが違います...\n${hints[pcd.hintLevel]}`,4500);
+      pcd.hintLevel++;
+    }else{
+      msg("パスコードが違います...");
+    }
+    pcd.code="";
   }
 }
 
