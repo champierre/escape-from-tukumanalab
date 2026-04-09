@@ -1473,8 +1473,10 @@ function checkPasscode(){
       "さらにヒント: 付箋の『いつもの』を、ひらがな表の番号に置き換えてみよう（例: い=2）。"
     ];
     if(pcd.fails>=3&&pcd.hintLevel<hints.length){
-      msg(`パスコードが違います...\n${hints[pcd.hintLevel]}`,4500);
       pcd.hintLevel++;
+    }
+    if(pcd.hintLevel>0){
+      msg(`パスコードが違います...\n${hints[pcd.hintLevel-1]}`,4500);
     }else{
       msg("パスコードが違います...");
     }
