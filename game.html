@@ -199,7 +199,6 @@ function clickRoom(x,y){
     return;
   }
   if(x>=room.wb.x&&x<=room.wb.x+room.wb.w&&y>=room.wb.y&&y<=room.wb.y+room.wb.h){msg("ホワイトボード: 「鍵 = ヘッド + シャフト + 歯」と書いてある...");sClick();return}
-  if(x>=710&&x<=810&&y>=90&&y<=210){msg("ゲルショッカーの掟\n\n1.めいれいにしたがわないものは、ころす。\n2.敵にまけたものは、『窒息させて』ころす。\n3.しっぱいしたものは、ころす。\n4.平和をあいするものは、ころす。\n5.友情をだいじにするものは、ころす。\n6.なまけもの・おくびょうものは、ころす。\n7.ちこくしたものは、ころす。\n8.病人けが人は、ころす。\n9.おや子、兄弟も組織のためには、ころす。\n\n2項だけ『窒息させて』と\n赤字で落書きされている。意味深だ…",0);sClick();return}
   // 消火器
   if(x>=860&&x<=900&&y>=340&&y<=430){sClick();msg("消火器だ。。",0);return}
   let cd=Math.hypot(x-room.clock.x,y-room.clock.y);
@@ -822,19 +821,6 @@ function drawRoom(c){
   // ラベル
   c.fillStyle="#555";c.font='9px "Noto Sans JP"';c.textAlign="center";
   c.fillText("消火器",feX+11,feY+72);
-  // Gel-Shocker poster
-  c.fillStyle="#1a0a00";c.fillRect(710,90,100,120);
-  c.strokeStyle="#660000";c.lineWidth=2;c.strokeRect(710,90,100,120);
-  c.fillStyle="#f00";c.font='bold 13px "Noto Sans JP"';c.textAlign="center";
-  c.fillText("☠",760,112);
-  c.fillStyle="#ff4444";c.font='bold 10px "Noto Sans JP"';
-  c.fillText("ゲルショッカー",760,130);
-  c.fillText("の掟",760,145);
-  // Small text lines (unreadable from distance)
-  c.fillStyle="#773333";c.font='5px "Noto Sans JP"';
-  for(let i=0;i<7;i++){
-    c.fillRect(722,155+i*8,76,3);
-  }
 
   // Navigation arrows
   drawArrow(c,"left","CAD室");
